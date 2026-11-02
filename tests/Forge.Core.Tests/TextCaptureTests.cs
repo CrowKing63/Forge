@@ -118,6 +118,43 @@ public class TextCaptureTests
         Assert.Equal(4, TextCapture.EstimateTokens("hello 한글"));
     }
 
+    // ---- Injected precise token counter (S4) ----
+
+    [Fact]
+    public void Capture_UsesInjectedTokenCounter_NotEstimate()
+    {
+        // cap = 8 - 4 = 4. The estimate would give "hello" 2 tokens (accepted), but the
+        // injected counter reports 10 -> must throw InputTooLong.
+        var capture = new TextCapture(contextSize: 8, safetyMargin: 4, tokenCounter: _ => 10);
+        var ex = Assert.Throws<TextCaptureException>(() => capture.Capture("hello"));
+        Assert.Equal(TextCaptureError.InputTooLong, ex.Error);
+    }
+
+    [Fact]
+    public void Capture_InjectedCounterAtLimit_IsAccepted()
+    {
+        // cap = 4. Counter reports exactly 4 -> accepted (guard is >, not >=).
+        var capture = new TextCapture(contextSize: 8, safetyMargin: 4, tokenCounter: _ => 4);
+        Assert.Equal("hello", capture.Capture("hello"));
+    }
+
+    [Fact]
+    public void Capture_WithoutInjectedCounter_FallsBackToEstimate()
+    {
+        // cap = 4. "hello" estimates to 2 tokens -> accepted by the fallback estimate.
+        var capture = new TextCapture(contextSize: 8, safetyMargin: 4);
+        Assert.Equal("hello", capture.Capture("hello"));
+    }
+
+    [Fact]
+    public void Capture_EmptyText_ThrowsBeforeCounterIsUsed()
+    {
+        // The empty check must fire before the token counter is consulted.
+        var capture = new TextCapture(contextSize: 8, safetyMargin: 4, tokenCounter: _ => throw new InvalidOperationException("must not be called"));
+        var ex = Assert.Throws<TextCaptureException>(() => capture.Capture((string?)null));
+        Assert.Equal(TextCaptureError.EmptyClipboard, ex.Error);
+    }
+
     // ---- Exception carries the reason ----
 
     [Fact]

@@ -7,9 +7,10 @@ namespace Forge.Core;
 /// enforces a maximum input-token guard before the text is handed to the pipeline.
 ///
 /// Clipboard-first by design (plan §5/§7): UIA range reading is only an auxiliary
-/// fallback and is out of scope here — the real UIA implementation lands in S4/S12. The
-/// token count is a conservative *estimate*; S4 replaces it with the engine's precise
-/// tokenizer.
+/// fallback and is out of scope here — the real UIA implementation lands in S4/S12.
+/// The token count uses an injected precise counter when one is supplied (S4 wires
+/// in <see cref="InferenceEngine.CountTokens"/>); otherwise it falls back to the
+/// conservative <see cref="EstimateTokens"/> estimate.
 ///
 /// <see cref="Capture()"/> reads the OS clipboard; <see cref="Capture(string?)"/> validates
 /// already-obtained text and is the unit-testable core (no clipboard access).
@@ -18,10 +19,18 @@ public sealed class TextCapture
 {
     private const int CfUnicodeText = 13;
 
+    private readonly Func<string, int>? _tokenCounter;
+
     /// <summary>Maximum input tokens accepted before rejection.</summary>
     public int MaxInputTokens { get; }
 
-    public TextCapture(int contextSize = 8192, int safetyMargin = 4096)
+    /// <param name="contextSize">Context window size in tokens.</param>
+    /// <param name="safetyMargin">Reserved tokens for the prompt overhead and output.</param>
+    /// <param name="tokenCounter">
+    /// Precise token counter (e.g. the engine's tokenizer). When null, falls back to
+    /// the conservative <see cref="EstimateTokens"/> estimate.
+    /// </param>
+    public TextCapture(int contextSize = 8192, int safetyMargin = 4096, Func<string, int>? tokenCounter = null)
     {
         if (contextSize <= 0)
             throw new ArgumentOutOfRangeException(nameof(contextSize), contextSize, "Context size must be positive.");
@@ -31,6 +40,7 @@ public sealed class TextCapture
             throw new ArgumentException("Safety margin must be smaller than the context size.", nameof(safetyMargin));
 
         MaxInputTokens = contextSize - safetyMargin;
+        _tokenCounter = tokenCounter;
     }
 
     /// <summary>
@@ -51,18 +61,18 @@ public sealed class TextCapture
             throw new TextCaptureException(TextCaptureError.EmptyClipboard,
                 "No text was found on the clipboard. Select some text and copy it (Ctrl+C), then try again.");
 
-        int estimatedTokens = EstimateTokens(clipboardText);
-        if (estimatedTokens > MaxInputTokens)
+        int tokens = _tokenCounter is not null ? _tokenCounter(clipboardText) : EstimateTokens(clipboardText);
+        if (tokens > MaxInputTokens)
             throw new TextCaptureException(TextCaptureError.InputTooLong,
-                $"The selection is about {estimatedTokens} tokens, which exceeds the maximum of {MaxInputTokens}. Select a shorter passage and try again.");
+                $"The selection is {tokens} tokens, which exceeds the maximum of {MaxInputTokens}. Select a shorter passage and try again.");
 
         return clipboardText;
     }
 
     /// <summary>
-    /// Conservative token *estimate* for a length guard: ASCII ≈ 4 chars/token, CJK/Hangul
-    /// ≈ 1 char/token (an upper bound). Deliberately overestimates so the guard never
-    /// under-shoots the context window. Replaced by the engine's precise tokenizer in S4.
+    /// Conservative token *estimate* used as the fallback guard when no precise counter
+    /// is injected: ASCII ≈ 4 chars/token, CJK/Hangul ≈ 1 char/token (an upper bound).
+    /// Deliberately overestimates so the guard never under-shoots the context window.
     /// </summary>
     public static int EstimateTokens(string text)
     {

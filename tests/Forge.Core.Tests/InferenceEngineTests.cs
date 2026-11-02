@@ -51,6 +51,20 @@ public class InferenceEngineTests
         Assert.Throws<FileNotFoundException>(() => engine.LoadModel(@"C:\does\not\exist.gguf"));
     }
 
+    [Fact]
+    public void CountTokens_WhenNotLoaded_Throws()
+    {
+        var engine = new InferenceEngine();
+        Assert.Throws<InvalidOperationException>(() => engine.CountTokens("hello"));
+    }
+
+    [Fact]
+    public void CountTokens_NullText_Throws()
+    {
+        var engine = new InferenceEngine();
+        Assert.Throws<ArgumentNullException>(() => engine.CountTokens(null!));
+    }
+
     // ---- Integration tests (require the real GGUF model; skipped if absent) ----
 
     [Fact]
@@ -114,6 +128,32 @@ public class InferenceEngineTests
 
             Assert.NotNull(firstToken);
             Assert.True(sw.Elapsed.TotalSeconds < 60, $"First token took {sw.Elapsed.TotalSeconds:F1}s (expected well under 60s).");
+        }
+        finally
+        {
+            engine.Unload();
+        }
+    }
+
+    [Fact]
+    public void CountTokens_RealModel_SaneCounts()
+    {
+        var modelPath = ResolveModelPath();
+        if (modelPath is null) throw Xunit.Sdk.SkipException.ForSkip("Model file not found; skipping integration test.");
+        string path = modelPath;
+
+        // Sanity checks only — exact token counts depend on the tokenizer and must not be pinned.
+        var engine = new InferenceEngine();
+        try
+        {
+            engine.LoadModel(path);
+            int shortAscii = engine.CountTokens("hello world");
+            int longAscii = engine.CountTokens("hello world hello world hello world");
+            int korean = engine.CountTokens("안녕하세요 세계. 오늘 날씨가 좋다.");
+
+            Assert.True(shortAscii > 0, "ASCII text tokenized to zero tokens.");
+            Assert.True(longAscii > shortAscii, "Longer ASCII text did not tokenize to more tokens.");
+            Assert.True(korean > 0, "Korean text tokenized to zero tokens.");
         }
         finally
         {

@@ -1,38 +1,122 @@
 using Forge.Core;
 
-// S1 console harness: drive InferenceEngine end-to-end and measure first-token latency.
-// Usage: dotnet run -- <modelPath> [prompt text...]
-// Defaults match the S0 model and a Korean proofreading prompt.
+// S4 console E2E (M1): selected text -> task -> PromptBuilder -> InferenceEngine (streaming) -> ResultParser.
+// Usage: dotnet run -- [task] [--model <path>]
+//   task: proofread | translate | rewrite | summarize  (default: proofread)
+// Exit codes: 0 = success, 1 = pipeline failure, 2 = usage error.
 
 const string defaultModel = @"C:\Users\uitaek\.cache\huggingface\hub\models--unsloth--gemma-4-E2B-it-qat-GGUF\snapshots\66a399f68ddd113b06dff02fca9523e55465d11d\gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf";
-const string systemPrompt = "Fix grammar, spelling, and punctuation. Do not change meaning, tone, or language. Output only the corrected text.";
 
-string modelPath = args.Length > 0 ? args[0] : defaultModel;
-string userText = args.Length > 1 ? string.Join(' ', args.Skip(1)) : "오늘 날씨가 너무 더워서 밖에 나가기 싫다.";
+// Suppress llama.cpp's native console log (S0/S1 harness noise) — M1 output must stay clean.
+LLama.Native.NativeLogConfig.llama_log_set(Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+Console.OutputEncoding = System.Text.Encoding.UTF8; // Korean output stays readable in any terminal / redirect
 
-// Gemma 4 role markers, hand-assembled (the engine does not template). Mirrors S0.
-string prompt = "<|turn>system\n" + systemPrompt + "\n<turn|>\n<|turn>user\n" + userText + "\n<turn|>\n<|turn>model\n";
+// ---- args ----
+string? modelPath = null;
+ForgeTask? parsedTask = null;
+for (int i = 0; i < args.Length; i++)
+{
+    if (args[i] == "--model")
+    {
+        if (i + 1 >= args.Length)
+        {
+            Console.Error.WriteLine("Usage: forge [proofread|translate|rewrite|summarize] [--model <path>]");
+            return 2;
+        }
+        modelPath = args[++i];
+        continue;
+    }
 
+    parsedTask = args[i] switch
+    {
+        "proofread" => ForgeTask.Proofread,
+        "translate" => ForgeTask.TranslateKrToEn,
+        "rewrite" => ForgeTask.Rewrite,
+        "summarize" => ForgeTask.Summarize,
+        _ => null,
+    };
+    if (parsedTask is null)
+    {
+        Console.Error.WriteLine($"Unknown task '{args[i]}'. Usage: forge [proofread|translate|rewrite|summarize] [--model <path>]");
+        return 2;
+    }
+}
+var task = parsedTask ?? ForgeTask.Proofread;
+
+// ---- load model (needed for both the precise tokenizer and inference) ----
+string path = modelPath ?? defaultModel;
+Console.WriteLine($"[load] {path}");
 var engine = new InferenceEngine(contextSize: 8192, gpuLayerCount: 0);
-
-Console.WriteLine($"[S1] Loading model on CPU (GpuLayerCount=0): {modelPath}");
 var swLoad = System.Diagnostics.Stopwatch.StartNew();
-engine.LoadModel(modelPath);
+try
+{
+    engine.LoadModel(path);
+}
+catch (Exception ex) when (ex is FileNotFoundException or ArgumentException)
+{
+    Console.Error.WriteLine($"[load] {ex.Message}");
+    return 1;
+}
 swLoad.Stop();
-Console.WriteLine($"[S1] Load: {swLoad.Elapsed.TotalSeconds:F1}s");
+Console.WriteLine($"[load] {swLoad.Elapsed.TotalSeconds:F1}s");
 
-Console.WriteLine($"\n[S1] IN: {userText}");
-Console.Write("[S1] OUT: ");
+// ---- capture: clipboard text, guarded by the engine's precise tokenizer (S2 + S4) ----
+const int safetyMargin = 4096;
+var capture = new TextCapture(contextSize: engine.ContextSize, safetyMargin: safetyMargin, tokenCounter: engine.CountTokens);
+string selected;
+try
+{
+    selected = capture.Capture();
+}
+catch (TextCaptureException ex)
+{
+    Console.Error.WriteLine($"[capture] {ex.Message}");
+    engine.Unload();
+    return 1;
+}
+int inputTokens = engine.CountTokens(selected);
+string preview = string.Join(' ', selected.Split('\r', '\n')).Trim();
+if (preview.Length > 100) preview = preview[..100] + "…";
+Console.WriteLine($"[capture] {selected.Length} chars / {inputTokens} tokens: \"{preview}\"");
+
+// ---- prompt assembly (S3) ----
+string prompt = PromptBuilder.Build(task, selected);
+
+// ---- output budget: exact context size minus the exact prompt size, with a margin ----
+int promptTokens = engine.CountTokens(prompt);
+int maxTokens = Math.Max(16, engine.ContextSize - promptTokens - 256);
+
+// ---- streaming inference (S1) ----
+Console.Write("[out] ");
+var swInfer = System.Diagnostics.Stopwatch.StartNew();
 var swFirst = System.Diagnostics.Stopwatch.StartNew();
 int tokenCount = 0;
 string? firstToken = null;
-await foreach (var token in engine.Complete(prompt, maxTokens: 300))
+var sb = new System.Text.StringBuilder();
+await foreach (var token in engine.Complete(prompt, maxTokens: maxTokens))
 {
     if (firstToken is null) { firstToken = token; swFirst.Stop(); }
+    sb.Append(token);
     Console.Write(token);
     tokenCount++;
 }
+swInfer.Stop();
 Console.WriteLine();
 
+// ---- result parsing and display (S3) ----
+var result = ResultParser.Parse(sb.ToString(), selected, task);
+if (result.IsEmpty)
+{
+    Console.Error.WriteLine("[error] The model returned no usable output.");
+    engine.Unload();
+    return 1;
+}
+if (result.HasError)
+    Console.Error.WriteLine("[warn] Output looks like a refusal or error message — review it before use.");
+if (result.LanguageMismatch)
+    Console.Error.WriteLine("[warn] Output language does not match what this task expects — review it before use.");
+
+double seconds = Math.Max(swInfer.Elapsed.TotalSeconds, 0.001);
+Console.WriteLine($"[done] {tokenCount} tokens in {swInfer.Elapsed.TotalSeconds:F1}s ({tokenCount / seconds:F1} tok/s); first token after {swFirst.Elapsed.TotalSeconds:F2}s");
 engine.Unload();
-Console.WriteLine($"\n[S1] Done. {tokenCount} tokens generated; first token after {swFirst.Elapsed.TotalSeconds:F2}s. Unloaded.");
+return 0;

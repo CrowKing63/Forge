@@ -77,6 +77,27 @@ public sealed class InferenceEngine : IAsyncDisposable
     }
 
     /// <summary>
+    /// Counts the exact number of tokens <paramref name="text"/> occupies in the loaded
+    /// model's vocabulary (no BOS token). This is the precise counter that replaces
+    /// <see cref="TextCapture.EstimateTokens"/> for the input guard (S4).
+    /// </summary>
+    public int CountTokens(string text)
+    {
+        if (text is null) throw new ArgumentNullException(nameof(text));
+
+        LLama.LLamaWeights weights;
+        lock (_gate)
+        {
+            if (_weights is null)
+                throw new InvalidOperationException("Model is not loaded. Call LoadModel first.");
+            weights = _weights;
+        }
+
+        // Positional args: (text, addBos, special, encoding) per LLamaSharp 0.30.0.
+        return weights.Tokenize(text, false, false, System.Text.Encoding.UTF8).Length;
+    }
+
+    /// <summary>
     /// Runs one inference on the fully-assembled <paramref name="prompt"/> (role markers
     /// included — this engine does not template), streaming decoded tokens.
     /// </summary>
