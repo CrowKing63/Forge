@@ -20,7 +20,16 @@ public enum ModelState
 /// <summary>
 /// Tray-only WPF shell: no main window. On startup it loads the model in the
 /// background and reflects the engine state on the tray icon (loading / ready /
-/// error). Context menu: Open Settings (stub, S7) and Exit.
+/// error). Context menu: Open Settings (S7) and Exit.
+///
+/// S6: global hotkeys (Ctrl+E popup-type by default, immediate-type from config)
+/// drive the task-selection overlay; selecting a task runs the S4 pipeline
+/// (capture → PromptBuilder → InferenceEngine streaming → ResultParser). The
+/// re-entry guard (plan §7) ignores hotkey presses while a task is processing.
+///
+/// S7: the result editor window streams tokens in during inference and renders
+/// the original-vs-result diff on completion; its buttons act on the result
+/// (Copy, Regenerate, Cancel) and expose Replace to S11 as an event.
 /// </summary>
 public partial class App : Application
 {
@@ -28,8 +37,16 @@ public partial class App : Application
     public const string DefaultModelPath =
         @"C:\Users\uitaek\.cache\huggingface\hub\models--unsloth--gemma-4-E2B-it-qat-GGUF\snapshots\66a399f68ddd113b06dff02fca9523e55465d11d\gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf";
 
+    /// <summary>Hotkey id reserved for the popup-type binding (overlay toggle).</summary>
+    private const int PopupHotkeyId = 1;
+
+    private ForgeSettings _settings = new();
     private InferenceEngine? _engine;
     private TaskbarIcon? _tray;
+    private HotkeyManager? _hotkeys;
+    private ProcessingGuard _guard = new();
+    private TaskOverlayWindow? _overlay;
+    private Dictionary<int, ForgeTask> _immediateHotkeys = new();
 
     [STAThread]
     public static void Main()
@@ -42,12 +59,153 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
-        var modelPath = ParseModelPath(e.Args);
-        _engine = new InferenceEngine();
+        _settings = ForgeSettings.Load();
+        var (modelPath, showOverlay, debugLogPath) = ParseArgs(e.Args, _settings.ModelPath);
+        DebugLog.SetPath(debugLogPath);
+
+        // GPU layer count stays 0 (CPU default); S8 wires the hardware setting through.
+        _engine = new InferenceEngine(_settings.ContextSize, gpuLayerCount: 0);
         BuildTray();
         SetState(ModelState.Loading, "Forge: loading model…");
 
+        SetupHotkeys(showOverlay);
+
+        if (e.Args.Contains("--demo"))
+            _ = RunDemoAsync(); // S7 debug hook: canned result, no model needed
         _ = LoadModelAsync(modelPath);
+    }
+
+    private void SetupHotkeys(bool showOverlayOnStart)
+    {
+        var (popupBinding, immediateBindings) = HotkeyConfig.Load();
+
+        _hotkeys = new HotkeyManager();
+        _hotkeys.Initialize();
+        _hotkeys.HotkeyPressed += OnHotkeyPressed;
+
+        if (!HotkeyBinding.TryParse(popupBinding, out var popup))
+            popup = default(HotkeyBinding); // unreachable: the default always parses
+        if (_hotkeys.Register(PopupHotkeyId, popup.Modifiers, popup.Key))
+            DebugLog.Write($"registered popup hotkey '{popupBinding}'");
+        else
+            DebugLog.Write($"popup hotkey '{popupBinding}' already in use — overlay unavailable via hotkey");
+
+        foreach (var entry in immediateBindings)
+        {
+            var id = PopupHotkeyId + _immediateHotkeys.Count + 1;
+            if (_hotkeys.Register(id, entry.Binding.Modifiers, entry.Binding.Key))
+            {
+                _immediateHotkeys[id] = entry.Task;
+                DebugLog.Write($"registered immediate hotkey for {entry.Task}");
+            }
+            else
+                DebugLog.Write($"immediate hotkey for {entry.Task} already in use — skipped");
+        }
+
+        if (showOverlayOnStart)
+            ShowOverlay();
+    }
+
+    private void OnHotkeyPressed(int id)
+    {
+        // Re-entry guard (plan §7): ignore hotkeys while a task is processing.
+        if (_guard.IsProcessing)
+        {
+            DebugLog.Write("hotkey ignored (task in progress)");
+            return;
+        }
+
+        if (id == PopupHotkeyId)
+        {
+            ShowOverlay();
+            return;
+        }
+
+        if (_immediateHotkeys.TryGetValue(id, out var task))
+            _ = RunTaskAsync(task, null);
+    }
+
+    private void ShowOverlay()
+    {
+        if (_overlay is not null && _overlay.IsVisible)
+        {
+            _overlay.Hide();
+            DebugLog.Write("overlay hidden (toggle)");
+            return;
+        }
+
+        _overlay ??= new TaskOverlayWindow();
+        _overlay.TaskSelected += OnTaskSelected;
+        _overlay.Show();
+        _overlay.Activate();
+        DebugLog.Write("overlay shown");
+    }
+
+    private void OnTaskSelected(ForgeTask task) => _ = RunTaskAsync(task, _overlay);
+
+    /// <summary>
+    /// Runs one task through the S4 pipeline (same wiring as Forge.Cli): capture →
+    /// PromptBuilder → streaming inference → ResultParser. The caller must have
+    /// acquired the re-entry guard; it is released when the run finishes.
+    ///
+    /// S7: opens the result editor after capture, streams tokens into it, and renders
+    /// the original-vs-result diff on completion. Closing the window (Cancel) cancels
+    /// the inference and keeps the original text.
+    /// </summary>
+    private async Task RunTaskAsync(ForgeTask task, TaskOverlayWindow? overlay)
+    {
+        var engine = _engine!;
+        DebugLog.Write($"task '{task}' started");
+        SetState(ModelState.Loading, $"Forge: working on {task}…");
+        overlay?.SetProcessing($"Working on {task}…");
+
+        string status;
+        ResultEditorWindow? window = null;
+        var cts = new CancellationTokenSource();
+        try
+        {
+            var capture = new TextCapture(
+                contextSize: engine.ContextSize,
+                safetyMargin: 4096,
+                tokenCounter: engine.CountTokens);
+            var selected = capture.Capture();
+
+            window = new ResultEditorWindow(selected, task);
+            window.Closed += (_, _) => cts.Cancel(); // Cancel / closing discards the result
+            window.RegenerateRequested += () => _ = RunTaskAsync(task, null);
+            window.ReplaceRequested += text => DebugLog.Write($"Replace requested ({text.Length} chars) — S11 will subscribe.");
+            window.Show();
+
+            var prompt = PromptBuilder.Build(task, selected);
+            var promptTokens = engine.CountTokens(prompt);
+            var maxTokens = Math.Max(16, engine.ContextSize - promptTokens - 256);
+
+            var sb = new System.Text.StringBuilder();
+            await foreach (var token in engine.Complete(prompt, maxTokens: maxTokens, cts.Token))
+            {
+                sb.Append(token);
+                window.AppendToken(token);
+            }
+
+            var result = ResultParser.Parse(sb.ToString(), selected, task);
+            window.Complete(result);
+            status = result.IsEmpty ? "No usable output" : "Done — result ready";
+        }
+        catch (OperationCanceledException)
+        {
+            status = "Cancelled — original kept";
+            window?.Close();
+        }
+        catch (Exception ex)
+        {
+            status = $"Failed: {ex.Message}";
+            window?.Close();
+        }
+
+        DebugLog.Write($"task '{task}' finished: {status}");
+        SetState(ModelState.Ready, "Forge: ready");
+        overlay?.SetIdle(status);
+        _guard.End();
     }
 
     private void BuildTray()
@@ -102,17 +260,49 @@ public partial class App : Application
         new SettingsWindow().Show();
     }
 
-    private async void OnExit(object sender, RoutedEventArgs e)
+    private void OnExit(object sender, RoutedEventArgs e) => Shutdown();
+
+    protected override void OnExit(ExitEventArgs e)
     {
-        await _engine!.DisposeAsync();
-        Shutdown();
+        // Single cleanup point: release the global hotkeys and native model.
+        _hotkeys?.Dispose();
+        _engine?.Unload();
+        base.OnExit(e);
+    }
+
+    /// <summary>
+    /// Splits startup args into (model path, show overlay at startup, debug log
+    /// path). "--debug-overlay" and "--debug-log &lt;path&gt;" are smoke-test hooks;
+    /// model-path resolution keeps the S5 rules on the remaining args.
+    /// </summary>
+    internal static (string ModelPath, bool ShowOverlay, string? DebugLog) ParseArgs(string[] args, string fallbackModelPath = DefaultModelPath)
+    {
+        var showOverlay = false;
+        string? debugLog = null;
+
+        var modelArgs = new List<string>();
+        for (var i = 0; i < args.Length; i++)
+        {
+            if (args[i] == "--debug-overlay")
+                continue;
+            if (args[i] == "--debug-log")
+            {
+                if (i + 1 < args.Length)
+                    debugLog = args[++i];
+                continue;
+            }
+            modelArgs.Add(args[i]);
+        }
+
+        return (ParseModelPath(modelArgs.ToArray(), fallbackModelPath), showOverlay, debugLog);
     }
 
     /// <summary>
     /// Model path from args: "--model &lt;path&gt;" takes priority, then the first
-    /// positional argument, then the default.
+    /// positional argument, then the saved settings value (which defaults to the
+    /// S0-verified model).
     /// </summary>
-    internal static string ParseModelPath(string[] args)
+    internal static string ParseModelPath(string[] args, string fallback = DefaultModelPath)
     {
         for (var i = 0; i < args.Length - 1; i++)
             if (args[i] == "--model")
@@ -122,6 +312,32 @@ public partial class App : Application
             if (!arg.StartsWith("--"))
                 return arg;
 
-        return DefaultModelPath;
+        return fallback;
+    }
+
+    // ---- demo path (S7 debug): simulates a pipeline run without loading the model, so
+    // the result editor's streaming → diff transition can be exercised on any machine. ----
+
+    private async Task RunDemoAsync()
+    {
+        const string original = "오늘 날기자가 너무 좋아서 밖에 나가고 싶다.";
+        const string result = "The weather is nice today, so I want to go outside.";
+
+        var window = new ResultEditorWindow(original, ForgeTask.TranslateKrToEn);
+        window.Show();
+        DebugLog.Write("demo run started (canned result, no model)");
+
+        await Task.Run(async () =>
+        {
+            for (int i = 0; i < result.Length; i += 2)
+            {
+                string chunk = result.Substring(i, Math.Min(2, result.Length - i));
+                window.Dispatcher.Invoke(() => window.AppendToken(chunk));
+                await Task.Delay(40);
+            }
+        });
+
+        window.Complete(ResultParser.Parse(result, original, ForgeTask.TranslateKrToEn));
+        DebugLog.Write("demo run completed");
     }
 }

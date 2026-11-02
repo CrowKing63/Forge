@@ -10,6 +10,8 @@
   <ItemGroup>
     <PackageReference Include="LLamaSharp" Version="0.30.0" />
     <PackageReference Include="LLamaSharp.Backend.Cpu" Version="0.30.0" />
+    <!-- DiffPlex: pure-managed diff engine behind DiffRenderer (S7 result editor). -->
+    <PackageReference Include="DiffPlex" Version="1.1.0" />
   </ItemGroup>
 
   <!-- LLamaSharp.Backend.Cpu ships native DLLs under a non-standard folder
