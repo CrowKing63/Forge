@@ -165,7 +165,12 @@ public partial class App : Application
         }
 
         if (_immediateHotkeys.TryGetValue(id, out var task))
+        {
+            if (!_guard.TryBegin())
+                return; // a concurrent press already owns the guard
+            DebugLog.Write($"immediate hotkey pressed → task '{task}'");
             _ = RunTaskAsync(task, null);
+        }
     }
 
     private void ShowOverlay()
@@ -184,7 +189,12 @@ public partial class App : Application
         DebugLog.Write("overlay shown");
     }
 
-    private void OnTaskSelected(ForgeTask task) => _ = RunTaskAsync(task, _overlay);
+    private void OnTaskSelected(ForgeTask task)
+    {
+        if (!_guard.TryBegin())
+            return; // a concurrent press already owns the guard
+        _ = RunTaskAsync(task, _overlay);
+    }
 
     /// <summary>
     /// Runs one task through the S4 pipeline (same wiring as Forge.Cli): capture →
@@ -233,7 +243,13 @@ public partial class App : Application
 
             window = new ResultEditorWindow(selected, task);
             window.Closed += (_, _) => cts.Cancel(); // Cancel / closing discards the result
-            window.RegenerateRequested += () => _ = RunTaskAsync(task, null);
+            window.RegenerateRequested += () =>
+            {
+                if (!_guard.TryBegin())
+                    return; // a concurrent run already owns the guard
+                window.Close(); // replace this run with a fresh one
+                _ = RunTaskAsync(task, null);
+            };
             window.ReplaceRequested += text => DebugLog.Write($"Replace requested ({text.Length} chars) — S11 will subscribe.");
             window.Show();
 
@@ -351,7 +367,10 @@ public partial class App : Application
         for (var i = 0; i < args.Length; i++)
         {
             if (args[i] == "--debug-overlay")
+            {
+                showOverlay = true;
                 continue;
+            }
             if (args[i] == "--debug-log")
             {
                 if (i + 1 < args.Length)
