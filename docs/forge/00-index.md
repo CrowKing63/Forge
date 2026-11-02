@@ -6,7 +6,10 @@
 범국가 지원 레포 — **README · 코드 주석 · 기타 문서 · UI 문자열은 기본적으로 영어**. (기존 기획 문서는 유지자 작업 노트로 한국어 유지; 신규·외부 문서만 영어 기본.)
 
 ## 레포 상태 (2026-11-02 기준)
-`C:\Users\uitaek\Forge`는 현재 **기획 문서만** 있다 (`docs/local-llm-text-app-plan.md`). 소스·프로젝트 파일은 전부 **미생성(to be created)**. 모든 지시서의 배경은 이 greenfield 상태를 전제로 한다.
+**S0~S8 완료**, S9~S13 미착수.
+- 소스: `src/Forge.Cli`, `src/Forge.Core`, `src/Forge.App`(WPF), `tests/Forge.Core.Tests` — 빌드 오류 0, 테스트 92/92.
+- 실행 로그: `S4-e2e-run-log.md`(M1), `S5-S8-run-log.md`(M2~M3 + 리뷰 수정).
+- S9~S13 착수 전 필독: `S5-S8-run-log.md`의 "Notes for later sessions" 섹션.
 
 ## 권장 프로젝트 구조 (생성 예정)
 ```
