@@ -9,3 +9,7 @@ obj/
 .idea/
 *.swp
 .DS_Store
+
+# Installer build output
+installer/publish/
+installer/Output/

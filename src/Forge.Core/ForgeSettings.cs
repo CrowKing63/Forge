@@ -19,9 +19,13 @@ public enum HardwareMode
 /// </summary>
 public sealed class ForgeSettings
 {
-    /// <summary>Default GGUF path (the S0-verified Gemma 4 E2B QAT model).</summary>
-    public const string DefaultModelPath =
-        @"C:\Users\uitaek\.cache\huggingface\hub\models--unsloth--gemma-4-E2B-it-qat-GGUF\snapshots\66a399f68ddd113b06dff02fca9523e55465d11d\gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf";
+    /// <summary>
+    /// Default GGUF path: the built-in model inside the managed models directory
+    /// (<c>%LOCALAPPDATA%\Forge\Models</c>, S9). First-run onboarding (S10) downloads
+    /// it there when missing.
+    /// </summary>
+    public static string DefaultModelPath => Path.Combine(
+        ModelManager.DefaultModelsDir, ModelManager.DefaultModelId + ".gguf");
 
     /// <summary>Model file path (the model catalog in S9 will populate the choice list).</summary>
     public string ModelPath { get; set; } = DefaultModelPath;

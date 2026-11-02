@@ -33,10 +33,6 @@ public enum ModelState
 /// </summary>
 public partial class App : Application
 {
-    /// <summary>Default model path; overridable via "--model &lt;path&gt;" or a positional arg.</summary>
-    public const string DefaultModelPath =
-        @"C:\Users\uitaek\.cache\huggingface\hub\models--unsloth--gemma-4-E2B-it-qat-GGUF\snapshots\66a399f68ddd113b06dff02fca9523e55465d11d\gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf";
-
     /// <summary>Hotkey id reserved for the popup-type binding (overlay toggle).</summary>
     private const int PopupHotkeyId = 1;
 
@@ -322,6 +318,11 @@ public partial class App : Application
 
     private async Task LoadModelAsync(string modelPath)
     {
+        // S10 first-run onboarding: when the configured model file is missing, download
+        // it (with progress + resume via S9) before attempting to load.
+        if (!File.Exists(modelPath))
+            await ShowOnboardingAsync(modelPath);
+
         try
         {
             await Task.Run(() => _engine!.LoadModel(modelPath));
@@ -335,6 +336,22 @@ public partial class App : Application
         {
             SetState(ModelState.Error, $"Forge: model failed to load — {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// S10: shows the onboarding window for a missing model file and waits for the
+    /// download (or cancellation). The window is closed before this returns; a failed
+    /// or cancelled download falls through to the normal load-failure path.
+    /// </summary>
+    private async Task ShowOnboardingAsync(string modelPath)
+    {
+        var onboarding = new OnboardingWindow(modelPath);
+        onboarding.Show();
+        DebugLog.Write("onboarding shown (model file missing)");
+        await onboarding.RunDownloadAsync();
+        if (!onboarding.Succeeded)
+            DebugLog.Write("onboarding ended without a model file");
+        onboarding.Close();
     }
 
     private void OnOpenSettings(object sender, RoutedEventArgs e)
@@ -358,7 +375,7 @@ public partial class App : Application
     /// path). "--debug-overlay" and "--debug-log &lt;path&gt;" are smoke-test hooks;
     /// model-path resolution keeps the S5 rules on the remaining args.
     /// </summary>
-    internal static (string ModelPath, bool ShowOverlay, string? DebugLog) ParseArgs(string[] args, string fallbackModelPath = DefaultModelPath)
+    internal static (string ModelPath, bool ShowOverlay, string? DebugLog) ParseArgs(string[] args, string fallbackModelPath)
     {
         var showOverlay = false;
         string? debugLog = null;
@@ -388,7 +405,7 @@ public partial class App : Application
     /// positional argument, then the saved settings value (which defaults to the
     /// S0-verified model).
     /// </summary>
-    internal static string ParseModelPath(string[] args, string fallback = DefaultModelPath)
+    internal static string ParseModelPath(string[] args, string fallback)
     {
         for (var i = 0; i < args.Length - 1; i++)
             if (args[i] == "--model")
