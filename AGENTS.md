@@ -63,3 +63,11 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+
+---
+
+## Project: Forge (international repo)
+
+- **Language default: English.** README, code comments, all docs, and UI strings are written in **English by default** — Forge targets international users, not just Korean speakers.
+- Conversation with the maintainer is in Korean; that does **not** change the language of repo artifacts.
+- Existing planning docs under `docs/` were authored in Korean as the maintainer's working notes. New and external-facing docs (README, release notes, user-facing copy) default to English — translate existing docs on request, not by default.

@@ -1,0 +1,25 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="LLamaSharp" Version="0.30.0" />
+    <PackageReference Include="LLamaSharp.Backend.Cpu" Version="0.30.0" />
+  </ItemGroup>
+
+  <!-- LLamaSharp.Backend.Cpu ships native DLLs under a non-standard folder
+       (LLamaSharpRuntimes/...) with no auto-copy targets, so copy them explicitly. -->
+  <ItemGroup>
+    <None Include="C:\Users\uitaek\.nuget\packages\llamasharp.backend.cpu\0.30.0\LLamaSharpRuntimes\win-x64\native\avx2\llama.dll" Link="llama.dll" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="C:\Users\uitaek\.nuget\packages\llamasharp.backend.cpu\0.30.0\LLamaSharpRuntimes\win-x64\native\avx2\ggml.dll" Link="ggml.dll" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="C:\Users\uitaek\.nuget\packages\llamasharp.backend.cpu\0.30.0\LLamaSharpRuntimes\win-x64\native\avx2\ggml-base.dll" Link="ggml-base.dll" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="C:\Users\uitaek\.nuget\packages\llamasharp.backend.cpu\0.30.0\LLamaSharpRuntimes\win-x64\native\avx2\ggml-cpu.dll" Link="ggml-cpu.dll" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="C:\Users\uitaek\.nuget\packages\llamasharp.backend.cpu\0.30.0\LLamaSharpRuntimes\win-x64\native\avx2\mtmd.dll" Link="mtmd.dll" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
