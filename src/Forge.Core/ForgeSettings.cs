@@ -14,8 +14,8 @@ public enum HardwareMode
 /// Forge user settings with JSON persistence.
 ///
 /// Pure: no WPF dependency, so it is testable from the core test project. The app shell (S5)
-/// loads it at startup; the settings window (S7) edits and saves it. The model catalog (S9)
-/// and GPU detection (S8) bind to these fields later — until then the values are plain config.
+/// loads it at startup; the settings window (S7) edits and saves it. GPU detection (S8) binds
+/// to <see cref="Hardware"/>; the model catalog (S9) will bind to <see cref="ModelPath"/> later.
 /// </summary>
 public sealed class ForgeSettings
 {
@@ -29,7 +29,10 @@ public sealed class ForgeSettings
     /// <summary>Context window size in tokens.</summary>
     public int ContextSize { get; set; } = 8192;
 
-    /// <summary>Hardware selection (CPU / GPU / Auto); detection lands in S8.</summary>
+    /// <summary>Seconds of idle time before the loaded model is unloaded (S8); reload happens on demand.</summary>
+    public int IdleUnloadSeconds { get; set; } = 120;
+
+    /// <summary>Hardware selection (CPU / GPU / Auto); resolved by <see cref="HardwareDetector"/> (S8).</summary>
     public HardwareMode Hardware { get; set; } = HardwareMode.Cpu;
 
     /// <summary>Per-task system prompts, keyed by <c>ForgeTask</c> name. Defaults from <see cref="PromptBuilder"/>.</summary>

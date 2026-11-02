@@ -42,6 +42,9 @@ public partial class App : Application
 
     private ForgeSettings _settings = new();
     private InferenceEngine? _engine;
+    private IdleUnloadManager? _idle;
+    private System.Threading.Timer? _idleTimer;
+    private string _modelPath = "";
     private TaskbarIcon? _tray;
     private HotkeyManager? _hotkeys;
     private ProcessingGuard _guard = new();
@@ -62,17 +65,57 @@ public partial class App : Application
         _settings = ForgeSettings.Load();
         var (modelPath, showOverlay, debugLogPath) = ParseArgs(e.Args, _settings.ModelPath);
         DebugLog.SetPath(debugLogPath);
+        _modelPath = modelPath;
 
-        // GPU layer count stays 0 (CPU default); S8 wires the hardware setting through.
-        _engine = new InferenceEngine(_settings.ContextSize, gpuLayerCount: 0);
+        // S8: detect hardware before any native load (LLamaSharp locks its runtime selection
+        // on the first load) and resolve the GPU layer count from the settings choice.
+        var hardware = HardwareDetector.Detect();
+        DebugLog.Write($"hardware: {hardware.Note}");
+        int gpuLayers = ResolveGpuLayerCount(_settings.Hardware, hardware, modelPath);
+        DebugLog.Write($"gpu layer count: {gpuLayers} (mode: {_settings.Hardware})");
+
+        _engine = new InferenceEngine(_settings.ContextSize, gpuLayers);
         BuildTray();
         SetState(ModelState.Loading, "Forge: loading model…");
 
         SetupHotkeys(showOverlay);
+        StartIdleTimer();
 
         if (e.Args.Contains("--demo"))
             _ = RunDemoAsync(); // S7 debug hook: canned result, no model needed
         _ = LoadModelAsync(modelPath);
+    }
+
+    /// <summary>Maps the settings' hardware choice to a GPU layer count via detection.</summary>
+    private static int ResolveGpuLayerCount(HardwareMode mode, HardwareInfo hardware, string modelPath)
+    {
+        if (mode == HardwareMode.Cpu)
+            return 0;
+
+        long modelSize = 0;
+        try { if (File.Exists(modelPath)) modelSize = new FileInfo(modelPath).Length; }
+        catch (Exception) { /* unreadable — treat as unknown size */ }
+
+        return HardwareDetector.RecommendGpuLayerCount(hardware, modelSize);
+    }
+
+    /// <summary>
+    /// S8 idle unload: a 1-second tick advances the state machine; when the timeout elapses
+    /// with a loaded model, it is unloaded and the tray reflects the idle state.
+    /// </summary>
+    private void StartIdleTimer()
+    {
+        _idle = new IdleUnloadManager(_settings.IdleUnloadSeconds, () => _engine!.IsLoaded, () => _engine!.Unload());
+        _idleTimer = new System.Threading.Timer(_ => OnIdleTick(), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+    }
+
+    private void OnIdleTick()
+    {
+        if (_idle?.Tick() == true)
+        {
+            DebugLog.Write($"model idle-unloaded after {_settings.IdleUnloadSeconds}s");
+            Dispatcher.Invoke(() => SetState(ModelState.Ready, "Forge: idle — model unloaded"));
+        }
     }
 
     private void SetupHotkeys(bool showOverlayOnStart)
@@ -159,6 +202,24 @@ public partial class App : Application
         SetState(ModelState.Loading, $"Forge: working on {task}…");
         overlay?.SetProcessing($"Working on {task}…");
 
+        // S8 on-demand reload: the model may have been idle-unloaded since the last task.
+        if (!engine.IsLoaded)
+        {
+            overlay?.SetProcessing("Loading model…");
+            try
+            {
+                await Task.Run(() => engine.LoadModel(_modelPath));
+            }
+            catch (Exception ex)
+            {
+                DebugLog.Write($"task '{task}' failed to load model: {ex.Message}");
+                SetState(ModelState.Error, $"Forge: model failed to load — {ex.Message}");
+                overlay?.SetIdle("Failed to load model");
+                _guard.End();
+                return;
+            }
+        }
+
         string status;
         ResultEditorWindow? window = null;
         var cts = new CancellationTokenSource();
@@ -189,6 +250,7 @@ public partial class App : Application
 
             var result = ResultParser.Parse(sb.ToString(), selected, task);
             window.Complete(result);
+            _idle?.NotifyInferenceCompleted(); // S8: reset the idle-unload timer
             status = result.IsEmpty ? "No usable output" : "Done — result ready";
         }
         catch (OperationCanceledException)
@@ -247,7 +309,11 @@ public partial class App : Application
         try
         {
             await Task.Run(() => _engine!.LoadModel(modelPath));
-            SetState(ModelState.Ready, "Forge: ready");
+            _idle?.NotifyInferenceCompleted(); // S8: arm the idle timer from (re)load
+            if (_engine!.FellBackToCpu)
+                SetState(ModelState.Ready, "Forge: ready (GPU unavailable — using CPU)");
+            else
+                SetState(ModelState.Ready, "Forge: ready");
         }
         catch (Exception ex)
         {
@@ -264,7 +330,8 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
-        // Single cleanup point: release the global hotkeys and native model.
+        // Single cleanup point: release the idle timer, global hotkeys, and native model.
+        _idleTimer?.Dispose();
         _hotkeys?.Dispose();
         _engine?.Unload();
         base.OnExit(e);

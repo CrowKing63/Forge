@@ -1,16 +1,19 @@
 using System.Runtime.CompilerServices;
 using LLama;
 using LLama.Common;
+using LLama.Native;
 
 namespace Forge.Core;
 
 /// <summary>
 /// Reusable, on-demand local-LLM inference service wrapping LLamaSharp.
 ///
-/// CPU-first: <see cref="GpuLayerCount"/> defaults to 0 (no GPU offload). The engine
-/// owns the model's lifetime — <see cref="LoadModel"/> loads on demand and
-/// <see cref="Unload"/> releases native resources. One <see cref="Complete"/> call
-/// runs one inference, streaming decoded tokens as an <see cref="IAsyncEnumerable{T}"/>.
+/// CPU-first: <see cref="GpuLayerCount"/> defaults to 0 (no GPU offload). When a GPU layer
+/// count is requested (S8 detection), the engine selects LLamaSharp's CUDA runtime before
+/// the first load; if the GPU load fails it falls back to CPU and reports the fallback via
+/// <see cref="FellBackToCpu"/>. The engine owns the model's lifetime — <see cref="LoadModel"/>
+/// loads on demand and <see cref="Unload"/> releases native resources. One <see cref="Complete"/>
+/// call runs one inference, streaming decoded tokens as an <see cref="IAsyncEnumerable{T}"/>.
 ///
 /// This engine does NOT apply chat templates. LLamaSharp 0.30.0 cannot execute Gemma 4's
 /// embedded Jinja template (it dumps the template source and crashes), so prompt assembly
@@ -32,6 +35,12 @@ public sealed class InferenceEngine : IAsyncDisposable
     /// <summary>Number of layers offloaded to GPU. 0 = CPU-only (default).</summary>
     public int GpuLayerCount { get; }
 
+    /// <summary>Layers actually offloaded after the last load (0 = CPU, including fallback).</summary>
+    public int ActiveGpuLayerCount { get; private set; }
+
+    /// <summary>True when a GPU load was requested but the engine fell back to CPU.</summary>
+    public bool FellBackToCpu => GpuLayerCount > 0 && ActiveGpuLayerCount == 0;
+
     /// <summary>True when a model is currently loaded.</summary>
     public bool IsLoaded
     {
@@ -49,6 +58,11 @@ public sealed class InferenceEngine : IAsyncDisposable
     /// <summary>
     /// Loads the GGUF model at <paramref name="modelPath"/>. Any previously loaded model
     /// is unloaded first, so this is safe to call repeatedly (reload).
+    ///
+    /// When <see cref="GpuLayerCount"/> &gt; 0 the CUDA runtime is selected and a GPU load
+    /// attempted; on failure the engine retries on CPU and reports via
+    /// <see cref="FellBackToCpu"/>. LLamaSharp locks its runtime selection on the first
+    /// native load in a process, so the configuration is only applied before that first load.
     /// </summary>
     public void LoadModel(string modelPath)
     {
@@ -60,20 +74,59 @@ public sealed class InferenceEngine : IAsyncDisposable
         lock (_gate)
         {
             UnloadCore();
+            ConfigureRuntime();
 
-            var parameters = new ModelParams(modelPath)
+            if (GpuLayerCount > 0)
             {
-                ContextSize = (uint)ContextSize,
-                GpuLayerCount = GpuLayerCount,
-            };
+                try
+                {
+                    LoadCore(modelPath, GpuLayerCount);
+                    ActiveGpuLayerCount = GpuLayerCount;
+                    return;
+                }
+                catch (Exception)
+                {
+                    // GPU load failed — fall back to CPU. A CUDA-built runtime also runs on
+                    // CPU with 0 layers, so the retry uses the already-loaded runtime.
+                }
+            }
 
-            _weights = LLama.LLamaWeights.LoadFromFile(parameters);
-            _executor = new StatelessExecutor(_weights, parameters, null!)
-            {
-                SystemMessage = null,
-                ApplyTemplate = false,
-            };
+            LoadCore(modelPath, 0);
+            ActiveGpuLayerCount = 0;
         }
+    }
+
+    /// <summary>
+    /// Selects the LLamaSharp native runtime (CUDA, then Vulkan, when a GPU layer count was
+    /// requested; AVX2 CPU otherwise). Only effective before the first native load in this
+    /// process — after that the selection is locked, which is fine: detection runs at
+    /// startup, before any load.
+    /// </summary>
+    private void ConfigureRuntime()
+    {
+        if (NativeLibraryConfig.LLama.LibraryHasLoaded)
+            return;
+
+        if (GpuLayerCount > 0)
+            NativeLibraryConfig.All.WithCuda(true).WithVulkan(true);
+        else
+            NativeLibraryConfig.All.WithCuda(false).WithAvx(AvxLevel.Avx2);
+    }
+
+    private void LoadCore(string modelPath, int gpuLayers)
+    {
+        var parameters = new ModelParams(modelPath)
+        {
+            ContextSize = (uint)ContextSize,
+            GpuLayerCount = gpuLayers,
+        };
+
+        _weights = LLama.LLamaWeights.LoadFromFile(parameters);
+        _executor = new StatelessExecutor(_weights, parameters, null!)
+        {
+            SystemMessage = null,
+            ApplyTemplate = false,
+        };
     }
 
     /// <summary>

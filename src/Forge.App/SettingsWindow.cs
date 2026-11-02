@@ -23,6 +23,7 @@ public sealed class SettingsWindow : Window
     private ComboBox _catalogBox = null!;
     private TextBox _modelPathBox = null!;
     private TextBox _contextBox = null!;
+    private TextBox _idleBox = null!;
     private RadioButton _cpuRadio = null!;
     private RadioButton _gpuRadio = null!;
     private RadioButton _autoRadio = null!;
@@ -108,6 +109,10 @@ public sealed class SettingsWindow : Window
         _contextBox = new TextBox { Margin = new Thickness(0, 4, 0, 12), Width = 120 };
         panel.Children.Add(MakeLabel("Context size (tokens):"));
         panel.Children.Add(_contextBox);
+
+        _idleBox = new TextBox { Margin = new Thickness(0, 4, 0, 12), Width = 120 };
+        panel.Children.Add(MakeLabel("Idle unload (seconds — model is unloaded after this much idle time):"));
+        panel.Children.Add(_idleBox);
         return MakeTab("Engine", panel);
     }
 
@@ -120,7 +125,18 @@ public sealed class SettingsWindow : Window
         panel.Children.Add(_cpuRadio);
         panel.Children.Add(_gpuRadio);
         panel.Children.Add(_autoRadio);
-        panel.Children.Add(MakeLabel("Hardware detection (S8) will populate GPU options; until then this is the settings surface only."));
+
+        string detectionText;
+        try
+        {
+            var hardware = HardwareDetector.Detect();
+            detectionText = hardware.Note;
+        }
+        catch (Exception)
+        {
+            detectionText = "Hardware detection unavailable.";
+        }
+        panel.Children.Add(MakeLabel(detectionText));
         return MakeTab("Hardware", panel);
     }
 
@@ -183,6 +199,7 @@ public sealed class SettingsWindow : Window
         _catalogBox.SelectedIndex = 0;
         _modelPathBox.Text = _settings.ModelPath;
         _contextBox.Text = _settings.ContextSize.ToString();
+        _idleBox.Text = _settings.IdleUnloadSeconds.ToString();
 
         _cpuRadio.IsChecked = _settings.Hardware == HardwareMode.Cpu;
         _gpuRadio.IsChecked = _settings.Hardware == HardwareMode.Gpu;
@@ -208,9 +225,15 @@ public sealed class SettingsWindow : Window
             SetStatus("Context size must be a positive number.");
             return;
         }
+        if (!int.TryParse(_idleBox.Text, out int idleSeconds) || idleSeconds <= 0)
+        {
+            SetStatus("Idle unload must be a positive number of seconds.");
+            return;
+        }
 
         _settings.ModelPath = _modelPathBox.Text.Trim();
         _settings.ContextSize = contextSize;
+        _settings.IdleUnloadSeconds = idleSeconds;
         _settings.Hardware = _gpuRadio.IsChecked == true ? HardwareMode.Gpu
             : _autoRadio.IsChecked == true ? HardwareMode.Auto
             : HardwareMode.Cpu;
