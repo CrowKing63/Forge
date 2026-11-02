@@ -1,78 +1,38 @@
-﻿using LLama;
-using LLama.Common;
-using System.Text;
+using Forge.Core;
 
-// S0 gate: CPU-only PoC. GpuLayerCount=0 because the agent is using the GPU.
-string modelPath = @"C:\Users\uitaek\.cache\huggingface\hub\models--unsloth--gemma-4-E2B-it-qat-GGUF\snapshots\66a399f68ddd113b06dff02fca9523e55465d11d\gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf";
-string outPath = @"C:\Users\uitaek\AppData\Local\hermes\cache\scratch\s0-results.txt";
+// S1 console harness: drive InferenceEngine end-to-end and measure first-token latency.
+// Usage: dotnet run -- <modelPath> [prompt text...]
+// Defaults match the S0 model and a Korean proofreading prompt.
 
-var parameters = new ModelParams(modelPath)
-{
-    ContextSize = 8192,
-    GpuLayerCount = 0, // force CPU
-};
+const string defaultModel = @"C:\Users\uitaek\.cache\huggingface\hub\models--unsloth--gemma-4-E2B-it-qat-GGUF\snapshots\66a399f68ddd113b06dff02fca9523e55465d11d\gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf";
+const string systemPrompt = "Fix grammar, spelling, and punctuation. Do not change meaning, tone, or language. Output only the corrected text.";
 
-Console.WriteLine("[S0] Loading model on CPU (GpuLayerCount=0)...");
+string modelPath = args.Length > 0 ? args[0] : defaultModel;
+string userText = args.Length > 1 ? string.Join(' ', args.Skip(1)) : "오늘 날씨가 너무 더워서 밖에 나가기 싫다.";
+
+// Gemma 4 role markers, hand-assembled (the engine does not template). Mirrors S0.
+string prompt = "<|turn>system\n" + systemPrompt + "\n<turn|>\n<|turn>user\n" + userText + "\n<turn|>\n<|turn>model\n";
+
+var engine = new InferenceEngine(contextSize: 8192, gpuLayerCount: 0);
+
+Console.WriteLine($"[S1] Loading model on CPU (GpuLayerCount=0): {modelPath}");
 var swLoad = System.Diagnostics.Stopwatch.StartNew();
-var model = LLama.LLamaWeights.LoadFromFile(parameters);
+engine.LoadModel(modelPath);
 swLoad.Stop();
-double loadSec = swLoad.Elapsed.TotalSeconds;
+Console.WriteLine($"[S1] Load: {swLoad.Elapsed.TotalSeconds:F1}s");
 
-string systemPrompt = "Fix grammar, spelling, and punctuation. Do not change meaning, tone, or language. Output only the corrected text.";
-string[] samples = new[]
+Console.WriteLine($"\n[S1] IN: {userText}");
+Console.Write("[S1] OUT: ");
+var swFirst = System.Diagnostics.Stopwatch.StartNew();
+int tokenCount = 0;
+string? firstToken = null;
+await foreach (var token in engine.Complete(prompt, maxTokens: 300))
 {
-    "오늘 날씨가 너무 더워서 밖에 나가기 싫다.",
-    "그 사람은 어제 밤에 집에 돌아왔다.",
-    "저는 이 프로젝트가 매우 중요하다라고 생각한다.",
-    "우리는 내일 회의실에서 모인후 논의를 시작할 것이다.",
-    "컴퓨터가 갑자기 꺼져서 모든 작업이 사라졌다.",
-};
-
-var inferenceParams = new InferenceParams { MaxTokens = 300 };
-// LLamaSharp 0.30.0 does not execute Gemma 4's embedded Jinja chat template
-// (ApplyTemplate=true dumps the template source as output). So we hand-build
-// the prompt with Gemma 4's role markers: <start_of_turn>user\n ... <end_of_turn>\n...
-var executor = new StatelessExecutor(model, parameters, null!)
-{
-    SystemMessage = null,
-    ApplyTemplate = false,
-};
-
-int totalTokens = 0;
-var swDecode = System.Diagnostics.Stopwatch.StartNew();
-var sb = new StringBuilder();
-for (int i = 0; i < samples.Length; i++)
-{
-    var s = samples[i];
-    // Gemma 4 chat format: system turn, user turn, then model generation prompt.
-    string prompt = "<|turn>system\n" + systemPrompt + "\n<turn|>\n<|turn>user\n" + s + "\n<turn|>\n<|turn>model\n";
-    Console.WriteLine($"\n[S0] IN[{i}]: {s}");
-    var outSb = new StringBuilder();
-    await foreach (var token in executor.InferAsync(prompt, inferenceParams, CancellationToken.None))
-    {
-        outSb.Append(token);
-        totalTokens++;
-    }
-    sb.AppendLine($"--- Sample {i + 1} ---");
-    sb.AppendLine("IN:  " + s);
-    sb.AppendLine("OUT: " + outSb.ToString().Trim());
-    sb.AppendLine();
+    if (firstToken is null) { firstToken = token; swFirst.Stop(); }
+    Console.Write(token);
+    tokenCount++;
 }
-swDecode.Stop();
-double decSec = swDecode.Elapsed.TotalSeconds;
-double tokPerSec = totalTokens / decSec;
+Console.WriteLine();
 
-var swUnload = System.Diagnostics.Stopwatch.StartNew();
-model.Dispose();
-swUnload.Stop();
-double unloadSec = swUnload.Elapsed.TotalSeconds;
-
-sb.AppendLine("=== TIMING ===");
-sb.AppendLine($"load:   {loadSec:F1}s");
-sb.AppendLine($"decode: {totalTokens} tokens in {decSec:F1}s = {tokPerSec:F1} tok/s");
-sb.AppendLine($"unload: {unloadSec:F1}s");
-
-File.WriteAllText(outPath, sb.ToString(), new UTF8Encoding(false));
-Console.WriteLine($"\n[S0] Decode: {totalTokens} tokens in {decSec:F1}s = {tokPerSec:F1} tok/s");
-Console.WriteLine($"[S0] Unload time: {unloadSec:F1}s");
-Console.WriteLine($"[S0] Results written to {outPath}");
+engine.Unload();
+Console.WriteLine($"\n[S1] Done. {tokenCount} tokens generated; first token after {swFirst.Elapsed.TotalSeconds:F2}s. Unloaded.");
