@@ -1,0 +1,8 @@
+<Window x:Class="Forge.App.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Forge Settings" Width="380" Height="180">
+    <!-- Placeholder: settings content is implemented in S7/S9 (S5 ships the shell only). -->
+    <TextBlock Margin="16" TextWrapping="Wrap"
+               Text="Settings are a placeholder for now. Model path, context size and other options will be implemented in S7/S9." />
+</Window>
