@@ -24,9 +24,9 @@
 - 정밀 토큰 카운트 최적화 — S4에서 엔진 tokenizer로 교체.
 
 ## 검증
-- [ ] Notepad에서 텍스트 선택 → Ctrl+C → `TextCapture`가 정확한 선택 문자열 반환.
-- [ ] 클립보드 비어있을 때 / 이미지일 때 명확한 에러.
-- [ ] 최대 길이 초과 입력 → 거부 + 에러 메시지.
+- [x] Notepad에서 텍스트 선택 → Ctrl+C → `TextCapture`가 정확한 선택 문자열 반환. (실 클립보드 probe: 알려진 문자열을 P/Invoke로 정확히 읽음)
+- [x] 클립보드 비어있을 때 / 이미지일 때 명확한 에러. (`EmptyClipboard` — 빈·비텍스트 페이로드 모두 null 경로로 동일 처리)
+- [x] 최대 길이 초과 입력 → 거부 + 에러 메시지. (xunit: `InputTooLong`, 경계 포함 15개 테스트 통과)
 
 ## 산출물
 - `src/Forge.Core/TextCapture.cs` + 테스트(가드·에러 경로)
