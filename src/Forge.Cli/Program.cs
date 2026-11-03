@@ -13,6 +13,10 @@ const string defaultModel = @"C:\Users\uitaek\.cache\huggingface\hub\models--uns
 LLama.Native.NativeLogConfig.llama_log_set(Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
 Console.OutputEncoding = System.Text.Encoding.UTF8; // Korean output stays readable in any terminal / redirect
 
+// ---- S13 eval mode: run the Korean eval set against the current prompts ----
+if (args.Length > 0 && args[0] == "eval")
+    return await RunEval(args.Skip(1).ToArray());
+
 // ---- args ----
 string? modelPath = null;
 ForgeTask? parsedTask = null;
@@ -140,3 +144,127 @@ double seconds = Math.Max(swInfer.Elapsed.TotalSeconds, 0.001);
 Console.WriteLine($"[done] {tokenCount} tokens in {swInfer.Elapsed.TotalSeconds:F1}s ({tokenCount / seconds:F1} tok/s); first token after {swFirst.Elapsed.TotalSeconds:F2}s");
 engine.Unload();
 return 0;
+
+// ---- S13 eval (M5): the Korean eval set against the current prompts ----
+// Usage: dotnet run -- eval [--model <path>] [--gpu] [--out <file>]
+// Mechanical gates per item: non-empty, no refusal/error markers, no language
+// mismatch, summaries <= 3 sentences, translations contain no Hangul. The report
+// pairs every output with its manual label for human review (plan §7).
+
+static async Task<int> RunEval(string[] args)
+{
+    string? modelPath = null;
+    bool wantGpu = false;
+    string outPath = "eval-report.txt";
+    for (int i = 0; i < args.Length; i++)
+    {
+        if (args[i] == "--model")
+        {
+            if (i + 1 >= args.Length)
+            {
+                Console.Error.WriteLine("Usage: forge eval [--model <path>] [--gpu] [--out <file>]");
+                return 2;
+            }
+            modelPath = args[++i];
+            continue;
+        }
+        if (args[i] == "--gpu") { wantGpu = true; continue; }
+        if (args[i] == "--out")
+        {
+            if (i + 1 >= args.Length)
+            {
+                Console.Error.WriteLine("Usage: forge eval [--model <path>] [--gpu] [--out <file>]");
+                return 2;
+            }
+            outPath = args[++i];
+            continue;
+        }
+        Console.Error.WriteLine($"Unknown eval argument '{args[i]}'. Usage: forge eval [--model <path>] [--gpu] [--out <file>]");
+        return 2;
+    }
+
+    string setPath = Path.Combine(AppContext.BaseDirectory, "eval-set.json");
+    if (!File.Exists(setPath))
+    {
+        Console.Error.WriteLine($"[eval] eval set not found: {setPath}");
+        return 1;
+    }
+    using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(setPath));
+    var items = new List<(string Id, ForgeTask Task, string Input, string Expected)>();
+    foreach (var item in doc.RootElement.GetProperty("items").EnumerateArray())
+    {
+        var taskName = item.GetProperty("task").GetString();
+        var task = taskName switch
+        {
+            "proofread" => ForgeTask.Proofread,
+            "translate" => ForgeTask.TranslateKrToEn,
+            "rewrite" => ForgeTask.Rewrite,
+            "summarize" => ForgeTask.Summarize,
+            _ => throw new InvalidOperationException($"Unknown task '{taskName}' in eval set."),
+        };
+        items.Add((item.GetProperty("id").GetString()!, task,
+                  item.GetProperty("input").GetString()!, item.GetProperty("expected").GetString()!));
+    }
+
+    string path = modelPath ?? defaultModel;
+    HardwareInfo hardware = HardwareDetector.Detect();
+    long modelSize = File.Exists(path) ? new FileInfo(path).Length : 0;
+    int gpuLayers = wantGpu ? HardwareDetector.RecommendGpuLayerCount(hardware, modelSize) : 0;
+    Console.WriteLine($"[load] {path} (gpu layers: {gpuLayers})");
+    var engine = new InferenceEngine(contextSize: 8192, gpuLayerCount: gpuLayers);
+    try
+    {
+        engine.LoadModel(path);
+    }
+    catch (Exception ex) when (ex is FileNotFoundException or ArgumentException)
+    {
+        Console.Error.WriteLine($"[load] {ex.Message}");
+        return 1;
+    }
+
+    var report = new System.Text.StringBuilder();
+    int failures = 0;
+    foreach (var (id, task, input, expected) in items)
+    {
+        string prompt = PromptBuilder.Build(task, input);
+        int promptTokens = engine.CountTokens(prompt);
+        int maxTokens = Math.Max(16, engine.ContextSize - promptTokens - 256);
+
+        var sb = new System.Text.StringBuilder();
+        await foreach (var token in engine.Complete(prompt, maxTokens: maxTokens))
+            sb.Append(token);
+
+        var result = ResultParser.Parse(sb.ToString(), input, task);
+        var problems = new List<string>();
+        if (result.IsEmpty) problems.Add("empty output");
+        if (result.HasError) problems.Add("refusal/error markers");
+        if (result.LanguageMismatch) problems.Add("language mismatch");
+        if (task == ForgeTask.Summarize && CountSentences(result.Text) > 3)
+            problems.Add($"summary has {CountSentences(result.Text)} sentences (> 3)");
+        if (task == ForgeTask.TranslateKrToEn && ContainsHangul(result.Text))
+            problems.Add("translation contains Hangul");
+
+        bool pass = problems.Count == 0;
+        if (!pass) failures++;
+        Console.WriteLine($"[{(pass ? "PASS" : "FAIL")}] {id}{(problems.Count > 0 ? " — " + string.Join("; ", problems) : "")}");
+
+        report.AppendLine($"=== {id} ({task}) [{(pass ? "PASS" : "FAIL")}]\n");
+        report.AppendLine("input:    " + input);
+        report.AppendLine("expected: " + expected);
+        report.AppendLine("actual:   " + result.Text);
+        if (problems.Count > 0)
+            report.AppendLine("flags:    " + string.Join("; ", problems));
+        report.AppendLine();
+    }
+
+    engine.Unload();
+    File.WriteAllText(outPath, report.ToString());
+    Console.WriteLine($"[eval] {items.Count - failures}/{items.Count} passed; report written to {outPath}");
+    return failures == 0 ? 0 : 1;
+}
+
+static int CountSentences(string text) =>
+    text.Split('.', '?', '!').Where(s => !string.IsNullOrWhiteSpace(s)).Count();
+
+static bool ContainsHangul(string text) =>
+    text.Any(c => c >= 0xAC00 && c <= 0xD7A3);

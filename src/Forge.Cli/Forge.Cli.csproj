@@ -13,4 +13,9 @@
     <ProjectReference Include="..\Forge.Core\Forge.Core.csproj" />
   </ItemGroup>
 
+  <!-- S13: the Korean eval set ships next to the exe so `eval` finds it at runtime. -->
+  <ItemGroup>
+    <Content Include="eval-set.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
