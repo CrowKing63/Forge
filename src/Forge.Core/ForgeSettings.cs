@@ -39,6 +39,12 @@ public sealed class ForgeSettings
     /// <summary>Hardware selection (CPU / GPU / Auto); resolved by <see cref="HardwareDetector"/> (S8).</summary>
     public HardwareMode Hardware { get; set; } = HardwareMode.Cpu;
 
+    /// <summary>
+    /// Opt-in crash dumps (plan §7): when true, a fatal exception writes a minimal dump
+    /// (stack + model path + timestamp, no text content) to %LOCALAPPDATA%\Forge\CrashDumps.
+    /// </summary>
+    public bool CrashDumpEnabled { get; set; } = false;
+
     /// <summary>Per-task system prompts, keyed by <c>ForgeTask</c> name. Defaults from <see cref="PromptBuilder"/>.</summary>
     public Dictionary<string, string> Prompts { get; set; } = DefaultPrompts();
 

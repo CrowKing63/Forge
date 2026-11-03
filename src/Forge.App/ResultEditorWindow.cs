@@ -190,9 +190,11 @@ public sealed class ResultEditorWindow : Window
 
     private void OnCopy(object sender, RoutedEventArgs e)
     {
-        // Copy goes to the clipboard immediately (S7).
-        Clipboard.SetText(ResultText);
-        SetStatus("Copied to clipboard");
+        // Copy goes to the clipboard immediately (S7), via the shared guard (S12).
+        if (ClipboardGuard.WriteText(ResultText))
+            SetStatus("Copied to clipboard");
+        else
+            SetStatus("Could not access the clipboard");
     }
 
     private void SetActionButtonsEnabled(bool enabled)

@@ -1,5 +1,3 @@
-using System.Runtime.InteropServices;
-
 namespace Forge.Core;
 
 /// <summary>
@@ -17,8 +15,6 @@ namespace Forge.Core;
 /// </summary>
 public sealed class TextCapture
 {
-    private const int CfUnicodeText = 13;
-
     private readonly Func<string, int>? _tokenCounter;
 
     /// <summary>Maximum input tokens accepted before rejection.</summary>
@@ -87,57 +83,15 @@ public sealed class TextCapture
         return (ascii + 3) / 4 + nonAscii;
     }
 
-    /// <summary>Reads the OS clipboard (Win32 P/Invoke — no WinForms/WPF dependency in Core).</summary>
+    /// <summary>Reads the OS clipboard (shared Win32 primitives — <see cref="ClipboardGuard"/>).</summary>
     internal static string? ReadClipboardText()
     {
-        bool opened = false;
-        for (int attempt = 0; attempt < 3 && !opened; attempt++)
-        {
-            opened = OpenClipboard(IntPtr.Zero);
-            if (!opened) Thread.Sleep(50); // clipboard is transiently locked by another app
-        }
-
+        var (opened, text) = ClipboardGuard.ReadText();
         if (!opened)
             throw new TextCaptureException(TextCaptureError.ClipboardUnavailable,
                 "The clipboard is locked by another application and could not be read. Try again.");
-
-        try
-        {
-            if (!IsClipboardFormatAvailable(CfUnicodeText))
-                return null; // empty, or a non-text payload (e.g., an image)
-
-            IntPtr hGlobal = GetClipboardData(CfUnicodeText);
-            if (hGlobal == IntPtr.Zero)
-                return null;
-
-            IntPtr pStr = GlobalLock(hGlobal);
-            string? text = pStr == IntPtr.Zero ? null : Marshal.PtrToStringUni(pStr);
-            if (pStr != IntPtr.Zero) GlobalUnlock(hGlobal);
-            return text;
-        }
-        finally
-        {
-            CloseClipboard();
-        }
+        return text;
     }
-
-    [DllImport("user32.dll")]
-    private static extern bool OpenClipboard(IntPtr hWndNewClip);
-
-    [DllImport("user32.dll")]
-    private static extern bool CloseClipboard();
-
-    [DllImport("user32.dll")]
-    private static extern bool IsClipboardFormatAvailable(int format);
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr GetClipboardData(uint format);
-
-    [DllImport("kernel32.dll")]
-    private static extern IntPtr GlobalLock(IntPtr hMem);
-
-    [DllImport("kernel32.dll")]
-    private static extern bool GlobalUnlock(IntPtr hMem);
 }
 
 /// <summary>Reason a <see cref="TextCapture"/> capture failed.</summary>

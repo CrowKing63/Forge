@@ -14,9 +14,6 @@ namespace Forge.Core;
 /// </summary>
 public static class ReplaceAction
 {
-    private const uint CfUnicodeText = 13;
-    private const uint GmemMoveable = 0x0002;
-
     /// <summary>What a replace attempt ended up as.</summary>
     public enum Outcome
     {
@@ -52,7 +49,7 @@ public static class ReplaceAction
 
         string? backup = TextCapture.ReadClipboardText();
 
-        if (!SetClipboardText(resultText))
+        if (!ClipboardGuard.WriteText(resultText))
             return new ReplaceResult(Outcome.ClipboardFallback,
                 "The clipboard could not be written. Use the Copy button and paste manually.");
 
@@ -70,9 +67,9 @@ public static class ReplaceAction
         // backup text).
         Thread.Sleep(600);
         if (backup is not null)
-            SetClipboardText(backup);
+            ClipboardGuard.WriteText(backup);
         else
-            ClearClipboard();
+            ClipboardGuard.Clear();
 
         return new ReplaceResult(Outcome.Replaced, "Replaced in the source app.");
     }
@@ -106,65 +103,7 @@ public static class ReplaceAction
         SupportedApps.FirstOrDefault(e => string.Equals(e.ProcessName, processName, StringComparison.OrdinalIgnoreCase))?.Level
         ?? AppSupportLevel.Unknown;
 
-    /// <summary>Writes text to the clipboard (Win32, with a retry for transient locks).</summary>
-    internal static bool SetClipboardText(string text)
-    {
-        if (!OpenClipboardWithRetry())
-            return false;
-
-        try
-        {
-            EmptyClipboard();
-            IntPtr hGlobal = GlobalAlloc(GmemMoveable, (uint)((text.Length + 1) * sizeof(char)));
-            if (hGlobal == IntPtr.Zero)
-                return false;
-
-            IntPtr pStr = GlobalLock(hGlobal);
-            if (pStr == IntPtr.Zero)
-            {
-                GlobalFree(hGlobal);
-                return false;
-            }
-
-            Marshal.Copy(text.ToCharArray(), 0, pStr, text.Length); // UTF-16; the null terminator is already zeroed by GlobalAlloc
-            GlobalUnlock(hGlobal);
-            bool ok = SetClipboardData(CfUnicodeText, hGlobal) != IntPtr.Zero;
-            if (!ok)
-                GlobalFree(hGlobal); // on failure we own the memory
-            return ok;
-        }
-        finally
-        {
-            CloseClipboard();
-        }
-    }
-
-    /// <summary>Clears the clipboard (used to restore an empty state after a successful replace).</summary>
-    internal static void ClearClipboard()
-    {
-        if (!OpenClipboardWithRetry())
-            return;
-        try
-        {
-            EmptyClipboard();
-        }
-        finally
-        {
-            CloseClipboard();
-        }
-    }
-
-    private static bool OpenClipboardWithRetry()
-    {
-        for (int attempt = 0; attempt < 3; attempt++)
-        {
-            if (OpenClipboard(IntPtr.Zero))
-                return true;
-            Thread.Sleep(50); // the clipboard is transiently locked by another app
-        }
-        return false;
-    }
-
+    /// <summary>Sends Ctrl+V via SendInput so the focused app pastes over its selection.</summary>
     private static void SendCtrlV()
     {
         var inputs = new INPUT[]
@@ -225,30 +164,6 @@ public static class ReplaceAction
 
     [DllImport("user32.dll")]
     private static extern bool IsWindow(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    private static extern bool OpenClipboard(IntPtr hWndNewClip);
-
-    [DllImport("user32.dll")]
-    private static extern bool CloseClipboard();
-
-    [DllImport("user32.dll")]
-    private static extern bool EmptyClipboard();
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr SetClipboardData(uint format, IntPtr hMem);
-
-    [DllImport("kernel32.dll")]
-    private static extern IntPtr GlobalAlloc(uint uFlags, uint dwBytes);
-
-    [DllImport("kernel32.dll")]
-    private static extern IntPtr GlobalFree(IntPtr hMem);
-
-    [DllImport("kernel32.dll")]
-    private static extern IntPtr GlobalLock(IntPtr hMem);
-
-    [DllImport("kernel32.dll")]
-    private static extern bool GlobalUnlock(IntPtr hMem);
 
     [DllImport("user32.dll")]
     private static extern uint SendInput(uint nInputs, INPUT[] inputs, int cbSize);

@@ -16,6 +16,7 @@ public class ForgeSettingsTests : IDisposable
 
         Assert.Equal(8192, settings.ContextSize);
         Assert.Equal(HardwareMode.Cpu, settings.Hardware);
+        Assert.False(settings.CrashDumpEnabled); // opt-in (plan §7)
         Assert.False(string.IsNullOrWhiteSpace(settings.ModelPath));
         Assert.Equal(PromptBuilder.SystemPrompt(ForgeTask.Proofread), settings.Prompts[ForgeTask.Proofread.ToString()]);
     }
@@ -29,6 +30,7 @@ public class ForgeSettingsTests : IDisposable
             ModelPath = @"C:\models\test.gguf",
             ContextSize = 4096,
             Hardware = HardwareMode.Gpu,
+            CrashDumpEnabled = true,
         };
         settings.Prompts[ForgeTask.Summarize.ToString()] = "Custom prompt.";
 
@@ -38,6 +40,7 @@ public class ForgeSettingsTests : IDisposable
         Assert.Equal(settings.ModelPath, loaded.ModelPath);
         Assert.Equal(settings.ContextSize, loaded.ContextSize);
         Assert.Equal(settings.Hardware, loaded.Hardware);
+        Assert.True(loaded.CrashDumpEnabled);
         Assert.Equal("Custom prompt.", loaded.Prompts[ForgeTask.Summarize.ToString()]);
     }
 

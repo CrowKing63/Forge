@@ -6,21 +6,23 @@ namespace Forge.Core.Tests;
 /// <summary>
 /// S11 ReplaceAction tests. The focus/paste path is verified live (Notepad smoke);
 /// here we cover the clipboard mechanics and the fallback/matrix logic, which need
-/// no real target window.
+/// no real target window. Runs in the "clipboard" collection: the OS clipboard is a
+/// single shared resource, so all clipboard-touching tests serialize there.
 /// </summary>
+[Collection("clipboard")]
 public class ReplaceActionTests
 {
     [Fact]
-    public void SetClipboardText_WritesReadableText()
+    public void WriteText_WritesReadableText()
     {
-        Assert.True(ReplaceAction.SetClipboardText("forge-s11-test-abc"));
+        Assert.True(ClipboardGuard.WriteText("forge-s11-test-abc"));
         Assert.Equal("forge-s11-test-abc", TextCapture.ReadClipboardText());
     }
 
     [Fact]
     public void TryReplace_EmptyResult_FallsBackWithoutTouchingClipboard()
     {
-        ReplaceAction.SetClipboardText("keep-me");
+        ClipboardGuard.WriteText("keep-me");
 
         var result = ReplaceAction.TryReplace("   ", IntPtr.Zero);
 

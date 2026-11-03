@@ -6,10 +6,10 @@
 범국가 지원 레포 — **README · 코드 주석 · 기타 문서 · UI 문자열은 기본적으로 영어**. (기존 기획 문서는 유지자 작업 노트로 한국어 유지; 신규·외부 문서만 영어 기본.)
 
 ## 레포 상태 (2026-11-03 기준)
-**S0~S11 완료**, S12~S13 미착수.
-- 소스: `src/Forge.Cli`, `src/Forge.Core`, `src/Forge.App`(WPF), `tests/Forge.Core.Tests` — 빌드 오류 0, 테스트 113/113.
-- 실행 로그: `S4-e2e-run-log.md`(M1), `S5-S8-run-log.md`(M2~M3 + 리뷰 수정), `S9-run-log.md`, `S10-run-log.md`, `S11-run-log.md`.
-- S12~S13 착수 전 필독: `S5-S8-run-log.md`의 "Notes for later sessions" 섹션.
+**S0~S12 완료**, S13 미착수.
+- 소스: `src/Forge.Cli`, `src/Forge.Core`, `src/Forge.App`(WPF), `tests/Forge.Core.Tests` — 빌드 오류 0, 테스트 118/118.
+- 실행 로그: `S4-e2e-run-log.md`(M1), `S5-S8-run-log.md`(M2~M3 + 리뷰 수정), `S9-run-log.md`, `S10-run-log.md`, `S11-run-log.md`, `S12-run-log.md`.
+- S13 착수 전 필독: `S5-S8-run-log.md`의 "Notes for later sessions" 섹션.
 
 ## 권장 프로젝트 구조 (생성 예정)
 ```

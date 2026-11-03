@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using Forge.Core;
 using Hardcodet.Wpf.TaskbarNotification;
 
@@ -41,6 +42,7 @@ public partial class App : Application
     private IdleUnloadManager? _idle;
     private System.Threading.Timer? _idleTimer;
     private string _modelPath = "";
+    private int _gpuLayers;
     private TaskbarIcon? _tray;
     private HotkeyManager? _hotkeys;
     private ProcessingGuard _guard = new();
@@ -59,6 +61,11 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
+        // S12: global exception handling — a fatal .NET exception ends the app (plan §7)
+        // with an opt-in crash dump (no text content) and user guidance.
+        DispatcherUnhandledException += OnDispatcherException;
+        AppDomain.CurrentDomain.UnhandledException += OnDomainException;
+
         _settings = ForgeSettings.Load();
         var (modelPath, showOverlay, debugLogPath) = ParseArgs(e.Args, _settings.ModelPath);
         DebugLog.SetPath(debugLogPath);
@@ -68,10 +75,10 @@ public partial class App : Application
         // on the first load) and resolve the GPU layer count from the settings choice.
         var hardware = HardwareDetector.Detect();
         DebugLog.Write($"hardware: {hardware.Note}");
-        int gpuLayers = ResolveGpuLayerCount(_settings.Hardware, hardware, modelPath);
-        DebugLog.Write($"gpu layer count: {gpuLayers} (mode: {_settings.Hardware})");
+        _gpuLayers = ResolveGpuLayerCount(_settings.Hardware, hardware, modelPath);
+        DebugLog.Write($"gpu layer count: {_gpuLayers} (mode: {_settings.Hardware})");
 
-        _engine = new InferenceEngine(_settings.ContextSize, gpuLayers);
+        _engine = new InferenceEngine(_settings.ContextSize, _gpuLayers);
         BuildTray();
         SetState(ModelState.Loading, "Forge: loading model…");
 
@@ -80,7 +87,22 @@ public partial class App : Application
 
         if (e.Args.Contains("--demo"))
             _ = RunDemoAsync(); // S7 debug hook: canned result, no model needed
+        if (e.Args.Contains("--smoke-crash"))
+            _ = SmokeCrashAsync(); // S12 smoke hook: exercises the global handler + crash dump
+
         _ = LoadModelAsync(modelPath);
+    }
+
+    /// <summary>
+    /// S12 smoke-test hook: after startup settles, raises an unhandled dispatcher
+    /// exception to exercise the global handler end-to-end (crash dump + guidance +
+    /// shutdown). Forces the opt-in on so the dump path runs regardless of settings.
+    /// </summary>
+    private async Task SmokeCrashAsync()
+    {
+        await Task.Delay(1500); // let startup finish so tray, hotkeys, and the engine exist
+        _settings.CrashDumpEnabled = true;
+        Dispatcher.BeginInvoke(() => throw new InvalidOperationException("smoke crash (S12 verification)"));
     }
 
     /// <summary>Maps the settings' hardware choice to a GPU layer count via detection.</summary>
@@ -224,7 +246,7 @@ public partial class App : Application
             {
                 DebugLog.Write($"task '{task}' failed to load model: {ex.Message}");
                 SetState(ModelState.Error, $"Forge: model failed to load — {ex.Message}");
-                overlay?.SetIdle("Failed to load model");
+                overlay?.SetIdle("Failed to load model — open Settings to check the model path.");
                 _guard.End();
                 return;
             }
@@ -274,6 +296,12 @@ public partial class App : Application
             _idle?.NotifyInferenceCompleted(); // S8: reset the idle-unload timer
             status = result.IsEmpty ? "No usable output" : "Done — result ready";
         }
+        catch (TextCaptureException ex)
+        {
+            // S12: capture failures carry their own user-facing message with a recovery path.
+            status = ex.Message;
+            window?.Close();
+        }
         catch (OperationCanceledException)
         {
             status = "Cancelled — original kept";
@@ -281,7 +309,8 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            status = $"Failed: {ex.Message}";
+            DebugLog.Write($"task '{task}' failed: {ex}");
+            status = $"Failed: {ex.Message} — the original text is untouched.";
             window?.Close();
         }
 
@@ -343,7 +372,8 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            SetState(ModelState.Error, $"Forge: model failed to load — {ex.Message}");
+            DebugLog.Write($"model failed to load at startup: {ex}");
+            SetState(ModelState.Error, $"Forge: model failed to load — {ex.Message}. Open Settings to check the model path.");
         }
     }
 
@@ -367,6 +397,43 @@ public partial class App : Application
     {
         new SettingsWindow().Show();
     }
+
+    // ---- S12: global exception handling (plan §7 — a fatal exception ends the app) ----
+
+    private void OnDispatcherException(object sender, DispatcherUnhandledExceptionEventArgs e)
+    {
+        e.Handled = true; // WPF would otherwise tear down with its own crash dialog
+        string? dumpPath = WriteCrashDump(e.Exception);
+        DebugLog.Write($"fatal exception: {e.Exception}");
+        MessageBox.Show(FatalMessage(dumpPath), "Forge", MessageBoxButton.OK, MessageBoxImage.Error);
+        Shutdown();
+    }
+
+    private void OnDomainException(object sender, UnhandledExceptionEventArgs e)
+    {
+        if (e.ExceptionObject is not Exception ex)
+            return;
+        string? dumpPath = WriteCrashDump(ex);
+        DebugLog.Write($"fatal exception (background thread): {ex}");
+        try
+        {
+            // Best effort: the process is ending, so the box may never be pumped —
+            // the dump file and debug log are the durable record.
+            Dispatcher.BeginInvoke(() => MessageBox.Show(FatalMessage(dumpPath), "Forge", MessageBoxButton.OK, MessageBoxImage.Error));
+        }
+        catch
+        {
+            // The dispatcher is already gone; nothing left to show.
+        }
+    }
+
+    private string? WriteCrashDump(Exception ex) =>
+        _settings.CrashDumpEnabled ? CrashDump.Write(ex, _modelPath, _gpuLayers) : null;
+
+    private static string FatalMessage(string? dumpPath) =>
+        "Forge hit an unexpected error and will close." +
+        (dumpPath is not null ? $"\n\nA crash dump was saved to:\n{dumpPath}" : "") +
+        "\n\nYour text and clipboard are untouched. Restart Forge to continue.";
 
     private void OnExit(object sender, RoutedEventArgs e) => Shutdown();
 

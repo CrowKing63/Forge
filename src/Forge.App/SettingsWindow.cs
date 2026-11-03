@@ -24,6 +24,7 @@ public sealed class SettingsWindow : Window
     private TextBox _modelPathBox = null!;
     private TextBox _contextBox = null!;
     private TextBox _idleBox = null!;
+    private CheckBox _crashDumpCheck = null!;
     private RadioButton _cpuRadio = null!;
     private RadioButton _gpuRadio = null!;
     private RadioButton _autoRadio = null!;
@@ -113,6 +114,10 @@ public sealed class SettingsWindow : Window
         _idleBox = new TextBox { Margin = new Thickness(0, 4, 0, 12), Width = 120 };
         panel.Children.Add(MakeLabel("Idle unload (seconds — model is unloaded after this much idle time):"));
         panel.Children.Add(_idleBox);
+
+        _crashDumpCheck = new CheckBox { Margin = new Thickness(0, 4, 0, 12) };
+        panel.Children.Add(MakeLabel("Write crash dumps on fatal errors (no text content is recorded):"));
+        panel.Children.Add(_crashDumpCheck);
         return MakeTab("Engine", panel);
     }
 
@@ -200,6 +205,7 @@ public sealed class SettingsWindow : Window
         _modelPathBox.Text = _settings.ModelPath;
         _contextBox.Text = _settings.ContextSize.ToString();
         _idleBox.Text = _settings.IdleUnloadSeconds.ToString();
+        _crashDumpCheck.IsChecked = _settings.CrashDumpEnabled;
 
         _cpuRadio.IsChecked = _settings.Hardware == HardwareMode.Cpu;
         _gpuRadio.IsChecked = _settings.Hardware == HardwareMode.Gpu;
@@ -234,6 +240,7 @@ public sealed class SettingsWindow : Window
         _settings.ModelPath = _modelPathBox.Text.Trim();
         _settings.ContextSize = contextSize;
         _settings.IdleUnloadSeconds = idleSeconds;
+        _settings.CrashDumpEnabled = _crashDumpCheck.IsChecked == true;
         _settings.Hardware = _gpuRadio.IsChecked == true ? HardwareMode.Gpu
             : _autoRadio.IsChecked == true ? HardwareMode.Auto
             : HardwareMode.Cpu;
