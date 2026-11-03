@@ -8,7 +8,7 @@
 ## 레포 상태 (2026-11-03 기준)
 **S0~S13 완료** — 전체 계획 완주.
 - 소스: `src/Forge.Cli`, `src/Forge.Core`, `src/Forge.App`(WPF), `tests/Forge.Core.Tests` — 빌드 오류 0, 테스트 118/118.
-- 실행 로그: `S4-e2e-run-log.md`(M1), `S5-S8-run-log.md`(M2~M3 + 리뷰 수정), `S9-run-log.md`, `S10-run-log.md`, `S11-run-log.md`, `S12-run-log.md`, `S13-run-log.md`.
+- 실행 로그: `run-log.md` (S4~S13 통합).
 - 회귀 게이트: `dotnet run --project src/Forge.Cli -- eval` (한국어 eval 세트 12항목, 기계적 판정 + 수동 라벨).
 
 ## 권장 프로젝트 구조 (생성 예정)
