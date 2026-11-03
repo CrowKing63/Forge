@@ -1,6 +1,8 @@
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using Forge.Core;
 
@@ -34,6 +36,7 @@ public sealed class TaskOverlayWindow : Window
     private readonly TextBlock _status;
     private int _selectedIndex;
     private bool _processing;
+    private IntPtr _hwnd;
 
     /// <summary>Raised on the UI thread when Enter selects a task.</summary>
     public event Action<ForgeTask>? TaskSelected;
@@ -62,6 +65,7 @@ public sealed class TaskOverlayWindow : Window
         root.Children.Add(_status);
         Content = root;
 
+        IsVisibleChanged += OnIsVisibleChanged; // force foreground each time the overlay appears
         UpdateHighlight();
     }
 
@@ -79,9 +83,44 @@ public sealed class TaskOverlayWindow : Window
                 Foreground = new SolidColorBrush(Color.FromRgb(0xE6, 0xE6, 0xEC)),
             },
         };
+        row.MouseLeftButtonUp += (_, _) => Select(index); // mouse path: click a row to select it
         _rows[index] = row;
         return row;
     }
+
+    /// <summary>
+    /// Moves the selection to <paramref name="index"/> (the mouse equivalent of Up/Down).
+    /// Disabled while a task is processing, matching the keyboard handler.
+    /// </summary>
+    private void Select(int index)
+    {
+        if (_processing)
+            return;
+        _selectedIndex = index;
+        UpdateHighlight();
+    }
+
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        _hwnd = new WindowInteropHelper(this).Handle;
+    }
+
+    /// <summary>
+    /// A topmost borderless popup does not reliably hold keyboard focus via WPF's
+    /// Activate() alone — Windows flash-activates it on key press (the visible flicker)
+    /// and the keystrokes land inconsistently. Forcing foreground on the real HWND
+    /// each time the overlay is shown gives it stable keyboard focus so Up/Down/Enter/Esc
+    /// all reach <see cref="OnPreviewKeyDown"/>.
+    /// </summary>
+    private void OnIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (IsVisible && _hwnd != IntPtr.Zero)
+            SetForegroundWindow(_hwnd);
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
 
     private void UpdateHighlight()
     {

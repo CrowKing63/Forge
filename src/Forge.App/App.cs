@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Forge.Core;
@@ -332,6 +333,17 @@ public partial class App : Application
         menu.Items.Add(exitItem);
 
         _tray = new TaskbarIcon { ContextMenu = menu };
+        // Left-click opens the same menu as right-click (easier than right-click for many input methods).
+        _tray.TrayLeftMouseUp += (_, _) => OpenTrayMenu();
+    }
+
+    private void OpenTrayMenu()
+    {
+        var menu = _tray?.ContextMenu;
+        if (menu is null)
+            return;
+        menu.Placement = PlacementMode.MousePoint;
+        menu.IsOpen = true;
     }
 
     private void SetState(ModelState state, string tooltip)
