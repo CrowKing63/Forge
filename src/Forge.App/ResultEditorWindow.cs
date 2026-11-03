@@ -14,9 +14,9 @@ namespace Forge.App;
 /// completion both panes are re-rendered as a diff (DiffRenderer) — inserted text is
 /// highlighted in the result pane, removed text in the original pane.
 ///
-/// Replace and Regenerate are exposed as events: the replace action itself is S11's domain
-/// (S11 subscribes to <see cref="ReplaceRequested"/>), and the pipeline re-run is wired by
-/// the app shell (<see cref="RegenerateRequested"/>). Cancel simply closes the window —
+/// Replace and Regenerate are exposed as events: the app shell wires Replace to S11's
+/// <see cref="Forge.Core.ReplaceAction"/> (reported back via <see cref="ReportReplace"/>)
+/// and re-runs the pipeline on Regenerate. Cancel simply closes the window —
 /// the original text was never mutated, so it is kept as-is.
 /// </summary>
 public sealed class ResultEditorWindow : Window
@@ -26,6 +26,18 @@ public sealed class ResultEditorWindow : Window
 
     /// <summary>Raised when the user picks Regenerate; the app re-runs the S4 pipeline.</summary>
     public event Action? RegenerateRequested;
+
+    /// <summary>
+    /// Reports an S11 replace outcome: on success the window closes (the text is now in
+    /// the source app); on clipboard fallback the guidance message is shown and the
+    /// window stays open so the user can Copy or Cancel.
+    /// </summary>
+    public void ReportReplace(ReplaceAction.ReplaceResult result)
+    {
+        SetStatus(result.Message);
+        if (result.Outcome == ReplaceAction.Outcome.Replaced)
+            Close();
+    }
 
     private static readonly FontFamily MonoFont = new("Consolas");
     private static readonly Brush InsertBrush = new SolidColorBrush(Color.FromRgb(0xC8, 0xE6, 0xC9)); // light green

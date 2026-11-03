@@ -45,6 +45,7 @@ public partial class App : Application
     private HotkeyManager? _hotkeys;
     private ProcessingGuard _guard = new();
     private TaskOverlayWindow? _overlay;
+    private IntPtr _sourceWindow = IntPtr.Zero; // S11: the app where the selection was made
     private Dictionary<int, ForgeTask> _immediateHotkeys = new();
 
     [STAThread]
@@ -178,6 +179,9 @@ public partial class App : Application
             return;
         }
 
+        // S11: capture the source window now — once the overlay is shown, Forge owns the focus.
+        _sourceWindow = ReplaceAction.CaptureSourceWindow();
+
         _overlay ??= new TaskOverlayWindow();
         _overlay.TaskSelected += OnTaskSelected;
         _overlay.Show();
@@ -246,7 +250,12 @@ public partial class App : Application
                 window.Close(); // replace this run with a fresh one
                 _ = RunTaskAsync(task, null);
             };
-            window.ReplaceRequested += text => DebugLog.Write($"Replace requested ({text.Length} chars) — S11 will subscribe.");
+            window.ReplaceRequested += text =>
+            {
+                var replaceResult = ReplaceAction.TryReplace(text, _sourceWindow);
+                DebugLog.Write($"replace: {replaceResult.Outcome} — {replaceResult.Message}");
+                window.ReportReplace(replaceResult);
+            };
             window.Show();
 
             var prompt = PromptBuilder.Build(task, selected);
