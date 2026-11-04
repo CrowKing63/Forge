@@ -23,6 +23,7 @@ public sealed class HotkeyManager : IDisposable
         if (_source is not null)
             return;
         _source = new HwndSource(new HwndSourceParameters("ForgeHotkeys", 1, 1));
+        ShowWindow(_source.Handle, SW_HIDE); // hidden message window — never shown on screen or in the taskbar
         _source.AddHook(OnWmHotKey);
     }
 
@@ -61,6 +62,11 @@ public sealed class HotkeyManager : IDisposable
         _source?.Dispose();
         _source = null;
     }
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    private const int SW_HIDE = 0;
 
     internal static class NativeMethods
     {
