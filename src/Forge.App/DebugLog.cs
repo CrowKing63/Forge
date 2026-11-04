@@ -20,6 +20,6 @@ internal static class DebugLog
         if (path is null)
             return;
         lock (Gate)
-            File.AppendAllText(path, $"[{DateTime.Now:HH:mm:ss.fff}] {message}");
+            File.AppendAllText(path, $"[{DateTime.Now:HH:mm:ss.fff}] {message}{Environment.NewLine}");
     }
 }

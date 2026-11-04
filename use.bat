@@ -6,5 +6,5 @@ rem  from settings, no debug scaffolding. This is what a user actually
 rem  runs day to day.
 rem ============================================================
 cd /d "%~dp0"
-echo [use] real flow - tray + Ctrl+E, real model
-dotnet run --project src\Forge.App
+echo [use] real flow - tray + Ctrl+E, real model; log: %TEMP%\forge-use.log
+dotnet run --project src\Forge.App -- --debug-log "%TEMP%\forge-use.log"

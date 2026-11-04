@@ -76,14 +76,15 @@ public static class ClipboardGuard
         }
     }
 
-    /// <summary>Clears the clipboard (no-op when it cannot be opened).</summary>
-    public static void Clear()
+    /// <summary>Clears the clipboard. Returns false when it cannot be opened.</summary>
+    public static bool Clear()
     {
         if (!OpenClipboardWithRetry())
-            return;
+            return false;
         try
         {
             EmptyClipboard();
+            return true;
         }
         finally
         {

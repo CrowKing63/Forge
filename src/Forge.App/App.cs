@@ -1,5 +1,6 @@
 using System.IO;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media.Imaging;
@@ -24,10 +25,11 @@ public enum ModelState
 /// background and reflects the engine state on the tray icon (loading / ready /
 /// error). Context menu: Open Settings (S7) and Exit.
 ///
-/// S6: global hotkeys (Ctrl+E popup-type by default, immediate-type from config)
-/// drive the task-selection overlay; selecting a task runs the S4 pipeline
-/// (capture → PromptBuilder → InferenceEngine streaming → ResultParser). The
-/// re-entry guard (plan §7) ignores hotkey presses while a task is processing.
+/// S6: global hotkeys. The popup-type binding (Ctrl+E by default) runs a direct
+/// translate — capture → PromptBuilder → streaming inference → ResultParser → replace
+/// in the source app — with no overlay and no result window. Immediate-type bindings
+/// from config still run their task through the S7 result editor. The re-entry guard
+/// (plan §7) ignores hotkey presses while a task is processing.
 ///
 /// S7: the result editor window streams tokens in during inference and renders
 /// the original-vs-result diff on completion; its buttons act on the result
@@ -49,6 +51,7 @@ public partial class App : Application
     private ProcessingGuard _guard = new();
     private TaskOverlayWindow? _overlay;
     private IntPtr _sourceWindow = IntPtr.Zero; // S11: the app where the selection was made
+    private AutomationElement? _sourceElement; // the focused element at hotkey time (for SetFocus before paste)
     private Dictionary<int, ForgeTask> _immediateHotkeys = new();
 
     [STAThread]
@@ -180,7 +183,14 @@ public partial class App : Application
 
         if (id == PopupHotkeyId)
         {
-            ShowOverlay();
+            if (!_guard.TryBegin())
+                return; // a concurrent press already owns the guard
+            // Direct translate: no overlay, no result window. Capture the source window
+            // now — once any Forge UI takes focus it would be gone.
+            _sourceWindow = ReplaceAction.CaptureSourceWindow();
+            _sourceElement = UiaProbe.GetFocusedElement();
+            DebugLog.Write($"hotkey pressed → direct translate (source {ReplaceAction.DescribeWindow(_sourceWindow)})");
+            _ = RunDirectAsync(ForgeTask.TranslateKrToEn);
             return;
         }
 
@@ -319,6 +329,125 @@ public partial class App : Application
         SetState(ModelState.Ready, "Forge: ready");
         overlay?.SetIdle(status);
         _guard.End();
+    }
+
+    /// <summary>
+    /// Direct translate (no overlay, no result window): reads the source app's selection
+    /// via UIA, runs the translation through the S4 pipeline, and replaces the selection
+    /// in the source app. Success is silent apart from the tray tooltip; failures surface
+    /// with a MessageBox carrying the specific recovery message.
+    /// The caller must have acquired the re-entry guard; it is released when the run finishes.
+    /// </summary>
+    private async Task RunDirectAsync(ForgeTask task)
+    {
+        var engine = _engine!;
+        DebugLog.Write($"direct '{task}' started");
+        SetState(ModelState.Loading, $"Forge: working on {task}…");
+
+        // S8 on-demand reload: the model may have been idle-unloaded since the last task.
+        if (!engine.IsLoaded)
+        {
+            DebugLog.Write($"direct '{task}' model load started");
+            try
+            {
+                await Task.Run(() => engine.LoadModel(_modelPath));
+            }
+            catch (Exception ex)
+            {
+                DebugLog.Write($"direct '{task}' failed to load model: {ex.Message}");
+                SetState(ModelState.Error, $"Forge: model failed to load — {ex.Message}");
+                MessageBox.Show($"Model failed to load — {ex.Message}. Open Settings to check the model path.",
+                    "Forge", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+            DebugLog.Write($"direct '{task}' model loaded");
+        }
+
+        try
+        {
+            // 1. Capture: read the selection directly via UIA (no injected keys, no clipboard).
+            DebugLog.Write($"direct '{task}' capture started");
+            DebugLog.Write($"direct '{task}' uia probe: {UiaProbe.DescribeFocusedSelection()}");
+            string? selected = UiaProbe.GetFocusedSelectionText();
+            if (selected is null)
+            {
+                DebugLog.Write($"direct '{task}' uia unavailable — clipboard fallback");
+                var (clipText, failure) = ReplaceAction.CopySelection(_sourceWindow);
+                selected = clipText;
+                if (selected is null)
+                    throw new TextCaptureException(TextCaptureError.EmptyClipboard,
+                        "No text was selected. Select some text and try again.");
+            }
+            DebugLog.Write($"direct '{task}' capture: {selected.Length} chars");
+
+            var capture = new TextCapture(
+                contextSize: engine.ContextSize,
+                safetyMargin: 4096,
+                tokenCounter: engine.CountTokens);
+            selected = capture.Capture(selected); // validates the token limit
+
+            // 2. Inference.
+            var prompt = PromptBuilder.Build(task, selected);
+            var promptTokens = engine.CountTokens(prompt);
+            var maxTokens = Math.Max(16, engine.ContextSize - promptTokens - 256);
+            DebugLog.Write($"direct '{task}' inference started ({promptTokens} prompt tokens)");
+            var sb = new System.Text.StringBuilder();
+            await foreach (var token in engine.Complete(prompt, maxTokens: maxTokens, CancellationToken.None))
+                sb.Append(token);
+            DebugLog.Write($"direct '{task}' inference done ({sb.Length} chars)");
+
+            var result = ResultParser.Parse(sb.ToString(), selected, task);
+            _idle?.NotifyInferenceCompleted(); // S8: reset the idle-unload timer
+
+            if (result.IsEmpty)
+            {
+                DebugLog.Write($"direct '{task}' finished: no usable output");
+                MessageBox.Show("No usable output — the original text is untouched.",
+                    "Forge", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            // 3. Replace: use the source app's native edit control directly. Falls back to
+            //    clipboard + SendInput when the target has no supported edit HWND.
+            DebugLog.Write($"direct '{task}' replace started");
+            bool replaced = UiaProbe.ReplaceSelectionText(_sourceWindow, result.Text);
+            ReplaceAction.ReplaceResult replaceResult;
+            if (replaced)
+            {
+                replaceResult = new(ReplaceAction.Outcome.Replaced, "Replaced via UIA TextRange.");
+            }
+            else
+            {
+                // Fallback: the old path (focus + SendInput Ctrl+V).
+                var freshElement = UiaProbe.GetFocusedElement();
+                if (freshElement is not null)
+                {
+                    try { freshElement.SetFocus(); Thread.Sleep(200); }
+                    catch (Exception ex) { DebugLog.Write($"direct '{task}' SetFocus failed: {ex.Message}"); }
+                }
+                replaceResult = ReplaceAction.TryReplace(result.Text, _sourceWindow);
+            }
+            DebugLog.Write($"direct '{task}' finished: {replaceResult.Outcome} — {replaceResult.Message} ({replaceResult.Diagnostics})");
+
+            if (replaceResult.Outcome != ReplaceAction.Outcome.Replaced)
+                MessageBox.Show(replaceResult.Message, "Forge", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        catch (TextCaptureException ex)
+        {
+            DebugLog.Write($"direct '{task}' capture failed: {ex.Message}");
+            MessageBox.Show(ex.Message, "Forge", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        catch (Exception ex)
+        {
+            DebugLog.Write($"direct '{task}' failed: {ex}");
+            MessageBox.Show($"Failed: {ex.Message} — the original text is untouched.",
+                "Forge", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            SetState(ModelState.Ready, "Forge: ready");
+            _guard.End();
+        }
     }
 
     private void BuildTray()
