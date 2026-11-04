@@ -48,10 +48,14 @@ public sealed class HotkeyManager : IDisposable
         _registeredIds.Clear();
     }
 
+    private const int WM_HOTKEY = 0x0312;
+
     private IntPtr OnWmHotKey(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        // On 64-bit processes lParam is pointer-sized; the hotkey id lives in the low word.
-        HotkeyPressed?.Invoke((int)(lParam.ToInt64() & 0xFFFF));
+        if (msg != WM_HOTKEY)
+            return IntPtr.Zero; // not a hotkey message — let it through untouched
+        // WM_HOTKEY carries the registered id in wParam; lParam's low word is the key's scan code.
+        HotkeyPressed?.Invoke(wParam.ToInt32());
         handled = true;
         return IntPtr.Zero;
     }
