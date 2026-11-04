@@ -98,6 +98,7 @@ public static class ClipboardGuard
         {
             if (OpenClipboard(IntPtr.Zero))
                 return true;
+            System.Diagnostics.Debug.WriteLine($"[ClipboardGuard] OpenClipboard attempt {attempt + 1} failed");
             Thread.Sleep(50); // the clipboard is transiently locked by another app
         }
         return false;

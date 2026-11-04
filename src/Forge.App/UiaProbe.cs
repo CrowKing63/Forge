@@ -1,4 +1,5 @@
 using System.Windows.Automation;
+using System.Windows.Automation.Text;
 using System.Runtime.InteropServices;
 
 namespace Forge.App;
@@ -169,5 +170,52 @@ internal static class UiaProbe
         var sb = new System.Text.StringBuilder(256);
         GetClassName(hwnd, sb, sb.Capacity);
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Replaces the selected portion of the focused element's text via UIA — no keyboard
+    /// input needed. Reads the full value, finds the selection, splices in the replacement,
+    /// and sets the combined result. Works for Chromium text fields that ignore synthetic
+    /// Ctrl+V. Returns true when the value was set successfully.
+    /// </summary>
+    public static bool ReplaceSelectionViaUia(AutomationElement? element, string selectedText, string replacement)
+    {
+        try
+        {
+            if (element is null) return false;
+            element.SetFocus();
+            Thread.Sleep(100);
+
+            // Get the full text of the element.
+            if (!element.TryGetCurrentPattern(TextPattern.Pattern, out var textPatternObj))
+                return false;
+            var textPattern = (TextPattern)textPatternObj;
+            string fullText = textPattern.DocumentRange.GetText(int.MaxValue);
+
+            // Find the selection within the full text and splice.
+            int idx = fullText.IndexOf(selectedText, StringComparison.Ordinal);
+            if (idx < 0)
+                return false; // selection not found — can't safely splice
+
+            string spliced = fullText[..idx] + replacement + fullText[(idx + selectedText.Length)..];
+
+            // Set the combined value.
+            if (!element.TryGetCurrentPattern(ValuePattern.Pattern, out var valuePatternObj))
+                return false;
+            var valuePattern = (ValuePattern)valuePatternObj;
+            if (valuePattern.Current.IsReadOnly)
+                return false;
+            valuePattern.SetValue(spliced);
+
+            // Note: cursor position resets to 0 after SetValue. WPF's UIA TextPatternRange
+            // does not expose a reliable way to reposition the cursor in Chromium fields.
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            DebugLog.Write($"ReplaceSelectionViaUia failed: {ex.Message}");
+            return false;
+        }
     }
 }

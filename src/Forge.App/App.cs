@@ -365,19 +365,20 @@ public partial class App : Application
 
         try
         {
-            // 1. Capture: read the selection directly via UIA (no injected keys, no clipboard).
+            // 1. Capture: read the selection directly via UIA (no keystrokes needed).
+            //    Falls back to Ctrl+C if UIA can't read it.
             DebugLog.Write($"direct '{task}' capture started");
-            DebugLog.Write($"direct '{task}' uia probe: {UiaProbe.DescribeFocusedSelection()}");
             string? selected = UiaProbe.GetFocusedSelectionText();
-            if (selected is null)
+            if (selected is null || selected.Length == 0)
             {
-                DebugLog.Write($"direct '{task}' uia unavailable — clipboard fallback");
-                var (clipText, failure) = ReplaceAction.CopySelection(_sourceWindow);
+                // Fallback: Ctrl+C on the UI thread
+                var (clipText, failure) = Application.Current.Dispatcher.Invoke(() =>
+                    ReplaceAction.CopySelection(_sourceWindow));
                 selected = clipText;
-                if (selected is null)
-                    throw new TextCaptureException(TextCaptureError.EmptyClipboard,
-                        "No text was selected. Select some text and try again.");
             }
+            if (selected is null)
+                throw new TextCaptureException(TextCaptureError.EmptyClipboard,
+                    "No text was selected. Select some text and try again.");
             DebugLog.Write($"direct '{task}' capture: {selected.Length} chars");
 
             var capture = new TextCapture(
@@ -408,24 +409,28 @@ public partial class App : Application
             }
 
             // 3. Replace: use the source app's native edit control directly. Falls back to
-            //    clipboard + SendInput when the target has no supported edit HWND.
+            //    character-by-character typing (Handy Direct) for Chromium, then UIA splice.
+            //    If all fail, the result stays on the clipboard with a guidance message.
             DebugLog.Write($"direct '{task}' replace started");
-            bool replaced = UiaProbe.ReplaceSelectionText(_sourceWindow, result.Text);
             ReplaceAction.ReplaceResult replaceResult;
+            bool replaced = UiaProbe.ReplaceSelectionText(_sourceWindow, result.Text);
             if (replaced)
             {
-                replaceResult = new(ReplaceAction.Outcome.Replaced, "Replaced via UIA TextRange.");
+                replaceResult = new(ReplaceAction.Outcome.Replaced, "Replaced via EM_REPLACESEL.");
             }
             else
             {
-                // Fallback: the old path (focus + SendInput Ctrl+V).
-                var freshElement = UiaProbe.GetFocusedElement();
-                if (freshElement is not null)
+                // Fallback for Chromium: UIA splice — replace only the selection within the full text.
+                // Works even when the visual selection is gone (inference takes seconds).
+                bool uiaSet = UiaProbe.ReplaceSelectionViaUia(_sourceElement, selected, result.Text);
+                if (uiaSet)
+                    replaceResult = new(ReplaceAction.Outcome.Replaced, "Replaced via UIA splice.");
+                else
                 {
-                    try { freshElement.SetFocus(); Thread.Sleep(200); }
-                    catch (Exception ex) { DebugLog.Write($"direct '{task}' SetFocus failed: {ex.Message}"); }
+                    ClipboardGuard.WriteText(result.Text);
+                    replaceResult = new(ReplaceAction.Outcome.ClipboardFallback,
+                        "The result is on the clipboard. Press Ctrl+V to paste it manually.");
                 }
-                replaceResult = ReplaceAction.TryReplace(result.Text, _sourceWindow);
             }
             DebugLog.Write($"direct '{task}' finished: {replaceResult.Outcome} — {replaceResult.Message} ({replaceResult.Diagnostics})");
 
