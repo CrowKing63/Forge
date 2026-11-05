@@ -36,8 +36,8 @@ public sealed class SettingsWindow : Window
     private RadioButton _cpuRadio = null!;
     private RadioButton _gpuRadio = null!;
     private RadioButton _autoRadio = null!;
-    private TextBox _popupBox = null!;
-    private readonly Dictionary<ForgeTask, TextBox> _immediateBoxes = new();
+    private HotkeyField _popupBox = null!;
+    private readonly Dictionary<ForgeTask, HotkeyField> _immediateBoxes = new();
     private TextBlock _status = null!;
     private Border[] _navItems = null!;
     private UIElement[] _sections = null!;
@@ -289,21 +289,21 @@ public sealed class SettingsWindow : Window
     private UIElement MakeHotkeysSection()
     {
         var panel = new StackPanel();
-        panel.Children.Add(MakeHint("Bindings use the form Ctrl+Shift+E. Leave a field empty to unbind it."));
+        panel.Children.Add(MakeHint("Click a field, then press the key combination (e.g. Ctrl+Shift+E). Press Esc while recording to clear it."));
 
-        _popupBox = new TextBox { Margin = new Thickness(0, 4, 0, 12), Width = 180 };
-        _popupBox.LostFocus += (_, _) => TryAutoSave();
+        _popupBox = new HotkeyField { Margin = new Thickness(0, 4, 0, 12), Width = 180 };
+        _popupBox.ValueChanged += (_, _) => TryAutoSave();
         panel.Children.Add(MakeLabel("Open overlay (popup)"));
         panel.Children.Add(_popupBox);
 
         panel.Children.Add(MakeSectionLabel("Immediate hotkeys (one task per binding)"));
         foreach (var task in Enum.GetValues<ForgeTask>())
         {
-            var box = new TextBox { Margin = new Thickness(0, 4, 0, 12), Width = 180 };
-            box.LostFocus += (_, _) => TryAutoSave();
+            var field = new HotkeyField { Margin = new Thickness(0, 4, 0, 12), Width = 180 };
+            field.ValueChanged += (_, _) => TryAutoSave();
             panel.Children.Add(MakeLabel(task.ToString()));
-            panel.Children.Add(box);
-            _immediateBoxes[task] = box;
+            panel.Children.Add(field);
+            _immediateBoxes[task] = field;
         }
 
         return MakeCard(panel);

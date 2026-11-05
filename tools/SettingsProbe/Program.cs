@@ -1,4 +1,5 @@
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -180,6 +181,57 @@ internal static class Program
                 // separate visual tree, so walking the combo only reaches closed-state text.
                 foreach (var t in AllTextBlocks(combo).Take(3))
                     Log($"  closed-field text '{t.Text[..Math.Min(24, t.Text.Length)]}' foreground={BrushName(TextElement.GetForeground(t))}");
+
+                // --- Hotkey capture field checks ---
+                var popupField = (HotkeyField)typeof(SettingsWindow).GetField("_popupBox",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(settings)!;
+                string originalPopup = popupField.Text;
+                Log($"hotkey field: popup.Text='{popupField.Text}'");
+
+                // FormatBinding must round-trip through the parser.
+                var formatted = HotkeyField.FormatBinding(Forge.Core.HotkeyBinding.ModControl | Forge.Core.HotkeyBinding.ModShift, 0x45);
+                Log($"format: {formatted}");
+                if (formatted != "Ctrl+Shift+E") throw new Exception("FormatBinding should yield Ctrl+Shift+E");
+                if (!Forge.Core.HotkeyBinding.TryParse(formatted, out var parsed)) throw new Exception("formatted binding should parse");
+                if (parsed.Modifiers != (Forge.Core.HotkeyBinding.ModControl | Forge.Core.HotkeyBinding.ModShift) || parsed.Key != 0x45)
+                    throw new Exception("parsed binding should match the captured mods+key");
+
+                // The popup field's loaded text (if any) must be a valid binding.
+                if (popupField.Text.Length > 0 && !Forge.Core.HotkeyBinding.TryParse(popupField.Text, out _))
+                    throw new Exception("loaded popup hotkey should be a valid binding");
+
+                // --- End-to-end capture: start capture, inject an AltKey-style SendInput combo,
+                // and verify the low-level hook records it. This is exactly the path that failed
+                // before (WPF PreviewKeyDown + GetAsyncKeyState saw no modifiers on a fast burst).
+                // Drive the capture logic directly. The modifier-reading path (GetAsyncKeyState) can't
+                // be exercised in this headless agent context — no physical keys are held — so we
+                // verify the paths that don't depend on live modifier state: a bare key keeps
+                // recording without changing the value, and Esc clears + ends capture.
+                var begin = typeof(HotkeyField).GetMethod("BeginCapture",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+                var handle = typeof(HotkeyField).GetMethod("HandleCaptureKey",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+                var capturingField = typeof(HotkeyField).GetField("_capturing",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+
+                begin.Invoke(popupField, null);
+                if (!(bool)capturingField.GetValue(popupField)!) throw new Exception("BeginCapture should set _capturing");
+
+                // A bare key (no modifiers held here) must NOT capture — it stays recording.
+                handle.Invoke(popupField, new object[] { 0x45, false });
+                if (!(bool)capturingField.GetValue(popupField)!) throw new Exception("a bare key should keep recording");
+                if (popupField.Text != originalPopup) throw new Exception("a bare key should not change the value");
+
+                // Esc clears the binding and ends capture.
+                handle.Invoke(popupField, new object[] { 0x1B, false });
+                if ((bool)capturingField.GetValue(popupField)!) throw new Exception("Esc should end capture");
+                if (popupField.Text != "") throw new Exception("Esc should clear the value");
+                Log("capture logic: bare-key + esc paths OK");
+
+                // Restore the field so the probe leaves the user's settings untouched. The setter
+                // does not raise ValueChanged, so no save fires here; the change-save section below
+                // persists the restored value along with everything else.
+                popupField.Text = originalPopup;
 
                 // --- Auto-save on change: raise LostFocus on a field and verify the file updates ---
                 string cfg = Forge.Core.ForgeSettings.DefaultConfigPath;
