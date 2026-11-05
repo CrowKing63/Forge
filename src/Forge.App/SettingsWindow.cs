@@ -11,17 +11,18 @@ namespace Forge.App;
 /// Settings window (S7), code-only WPF. Tabs: Model / Engine / Hardware / Prompts / Hotkeys.
 ///
 /// Persists to <see cref="ForgeSettings"/> (JSON under %LOCALAPPDATA%\Forge). The hotkey tab
-/// is the source of truth the hotkey layer (S6) reads from; the model and hardware tabs are
-/// the surfaces the model catalog (S9) and GPU detection (S8) bind to later — until then the
-/// values are plain config, and the model "catalog" is a simple list placeholder.
+/// is the source of truth the hotkey layer (S6) reads from; the model tab lists every GGUF
+/// in the models directory (<see cref="ModelManager.DefaultModelsDir"/>) and, when the app
+/// supplies <paramref name="applyModel"/>, hot-swaps the loaded model on save — no restart.
 /// </summary>
 public sealed class SettingsWindow : Window
 {
     private readonly ForgeSettings _settings;
     private readonly Dictionary<ForgeTask, TextBox> _promptBoxes = new();
+    private readonly Func<string, Task<bool>>? _applyModel;
+    private readonly string _originalModelPath;
 
-    private ComboBox _catalogBox = null!;
-    private TextBox _modelPathBox = null!;
+    private ComboBox _modelBox = null!;
     private TextBox _contextBox = null!;
     private TextBox _idleBox = null!;
     private CheckBox _crashDumpCheck = null!;
@@ -32,9 +33,23 @@ public sealed class SettingsWindow : Window
     private readonly Dictionary<ForgeTask, TextBox> _immediateBoxes = new();
     private TextBlock _status = null!;
 
-    public SettingsWindow()
+    /// <summary>One dropdown entry: a catalog model plus its file path.</summary>
+    private sealed record ModelChoice(ModelInfo Info, string Path)
+    {
+        public override string ToString() =>
+            string.IsNullOrEmpty(Info.Quantization) ? Info.Name : $"{Info.Name} ({Info.Quantization})";
+    }
+
+    /// <param name="applyModel">
+    /// Optional hot-swap hook: invoked with the new model path when the user saves a
+    /// different model. Returns true on success. When null, saving only persists settings
+    /// (takes effect on next start).
+    /// </param>
+    public SettingsWindow(Func<string, Task<bool>>? applyModel = null)
     {
         _settings = ForgeSettings.Load();
+        _applyModel = applyModel;
+        _originalModelPath = _settings.ModelPath;
         Title = "Forge Settings";
         Width = 560;
         Height = 640;
@@ -88,18 +103,11 @@ public sealed class SettingsWindow : Window
     {
         var panel = new StackPanel { Margin = new Thickness(8) };
 
-        _catalogBox = new ComboBox { Margin = new Thickness(0, 4, 0, 12), MinWidth = 360 };
-        _catalogBox.SelectionChanged += (_, _) =>
-        {
-            if (_catalogBox.SelectedItem is string path)
-                _modelPathBox.Text = path;
-        };
-        panel.Children.Add(MakeLabel("Model catalog (placeholder — the real catalog lands in S9):"));
-        panel.Children.Add(_catalogBox);
-
-        _modelPathBox = new TextBox { Margin = new Thickness(0, 4, 0, 12), MinWidth = 360 };
-        panel.Children.Add(MakeLabel("Model file path:"));
-        panel.Children.Add(_modelPathBox);
+        // S9: the models dropdown lists every GGUF in the models directory. No manual
+        // path entry — dropping a file into the folder makes it appear here.
+        _modelBox = new ComboBox { Margin = new Thickness(0, 4, 0, 12), MinWidth = 360 };
+        panel.Children.Add(MakeLabel($"Model (from {ModelManager.DefaultModelsDir}):"));
+        panel.Children.Add(_modelBox);
 
         return MakeTab("Model", panel);
     }
@@ -198,11 +206,25 @@ public sealed class SettingsWindow : Window
 
     private void PopulateFromSettings()
     {
-        _catalogBox.Items.Add(_settings.ModelPath);
-        if (_settings.ModelPath != ForgeSettings.DefaultModelPath)
-            _catalogBox.Items.Add(ForgeSettings.DefaultModelPath);
-        _catalogBox.SelectedIndex = 0;
-        _modelPathBox.Text = _settings.ModelPath;
+        // S9: list every GGUF in the models directory; select the currently configured one.
+        var manager = new ModelManager(ModelManager.DefaultModelsDir);
+        foreach (var m in manager.ListModels())
+            _modelBox.Items.Add(new ModelChoice(m, manager.GetPath(m)));
+
+        // If the configured path is outside the directory (e.g. a custom location), keep it
+        // selectable so saving doesn't silently switch models.
+        string current = _settings.ModelPath;
+        if (_modelBox.Items.Cast<ModelChoice>().All(c => c.Path != current))
+        {
+            var fileName = Path.GetFileNameWithoutExtension(current);
+            _modelBox.Items.Add(new ModelChoice(
+                new ModelInfo(fileName, fileName, "", 0, "", ""),
+                current));
+        }
+
+        var selected = _modelBox.Items.Cast<ModelChoice>().FirstOrDefault(c => c.Path == current);
+        _modelBox.SelectedItem = selected ?? _modelBox.Items.Cast<ModelChoice>().First();
+
         _contextBox.Text = _settings.ContextSize.ToString();
         _idleBox.Text = _settings.IdleUnloadSeconds.ToString();
         _crashDumpCheck.IsChecked = _settings.CrashDumpEnabled;
@@ -237,7 +259,11 @@ public sealed class SettingsWindow : Window
             return;
         }
 
-        _settings.ModelPath = _modelPathBox.Text.Trim();
+        var choice = _modelBox.SelectedItem as ModelChoice;
+        string newModelPath = choice?.Path ?? "";
+        bool modelChanged = newModelPath != _originalModelPath;
+
+        _settings.ModelPath = newModelPath;
         _settings.ContextSize = contextSize;
         _settings.IdleUnloadSeconds = idleSeconds;
         _settings.CrashDumpEnabled = _crashDumpCheck.IsChecked == true;
@@ -270,12 +296,25 @@ public sealed class SettingsWindow : Window
         {
             _settings.Save();
             SaveHotkeys(popup, immediate);
-            SetStatus("Saved.");
+            if (modelChanged && _applyModel is not null)
+            {
+                SetStatus("Switching model…");
+                _ = ApplyModelAsync(newModelPath);
+            }
+            else
+                SetStatus("Saved.");
         }
         catch (Exception ex)
         {
             SetStatus($"Save failed: {ex.Message}");
         }
+    }
+
+    /// <summary>Runs the hot-swap hook and reports the outcome in the status line.</summary>
+    private async Task ApplyModelAsync(string path)
+    {
+        bool ok = await _applyModel!(path);
+        SetStatus(ok ? "Saved — model switched." : "Saved — model switch failed.");
     }
 
     /// <summary>Writes the hotkey config file that the hotkey layer (S6) reads.</summary>

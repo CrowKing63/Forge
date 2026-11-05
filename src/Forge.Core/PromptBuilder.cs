@@ -43,18 +43,40 @@ public static class PromptBuilder
     /// <summary>The system-prompt text for a task (exposed for tests and S13 tuning).</summary>
     public static string SystemPrompt(ForgeTask task) => SystemPrompts[task];
 
+    /// <summary>The Hy-MT2 translation instruction, verbatim from the model's README (S15-verified).</summary>
+    private const string HyMt2TranslateInstruction =
+        "Translate the following segment into English, without additional explanation:";
+
+    /// <summary>
+    /// Builds the complete prompt for <paramref name="task"/> with
+    /// <paramref name="selectedText"/> as the user turn, in the format
+    /// <paramref name="family"/> expects. Throws
+    /// <see cref="ArgumentException"/> when the selected text is null or whitespace-only.
+    /// </summary>
+    public static string Build(ForgeTask task, string selectedText, ModelFamily family)
+    {
+        if (string.IsNullOrWhiteSpace(selectedText))
+            throw new ArgumentException("Selected text must not be empty.", nameof(selectedText));
+
+        return family switch
+        {
+            // S15: Hy-MT2 ignores the Gemma format entirely. Its README prompt shape is
+            // <|hy_begin_of_sentence|><|hy_User|>{instruction}{input}<|hy_Assistant|>.
+            ModelFamily.HyMt2 => "<|hy_begin_of_sentence|><|hy_User|>"
+                + (task == ForgeTask.TranslateKrToEn ? HyMt2TranslateInstruction : SystemPrompts[task] + " ")
+                + selectedText
+                + "<|hy_Assistant|>",
+            _ => "<|turn>system\n" + SystemPrompts[task] + "\n<turn|>\n"
+               + "<|turn>user\n" + selectedText + "\n<turn|>\n"
+               + "<|turn>model\n",
+        };
+    }
+
     /// <summary>
     /// Builds the complete prompt for <paramref name="task"/> with
     /// <paramref name="selectedText"/> as the user turn. Throws
     /// <see cref="ArgumentException"/> when the selected text is null or whitespace-only.
     /// </summary>
     public static string Build(ForgeTask task, string selectedText)
-    {
-        if (string.IsNullOrWhiteSpace(selectedText))
-            throw new ArgumentException("Selected text must not be empty.", nameof(selectedText));
-
-        return "<|turn>system\n" + SystemPrompts[task] + "\n<turn|>\n"
-             + "<|turn>user\n" + selectedText + "\n<turn|>\n"
-             + "<|turn>model\n";
-    }
+        => Build(task, selectedText, ModelFamily.Gemma4);
 }

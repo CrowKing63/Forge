@@ -63,4 +63,41 @@ public class PromptBuilderTests
         Assert.Throws<ArgumentException>(() => PromptBuilder.Build(ForgeTask.Proofread, "   "));
         Assert.Throws<ArgumentException>(() => PromptBuilder.Build(ForgeTask.Proofread, null!));
     }
+
+    // ---- Build: Hy-MT2 family (S15) ----
+
+    [Fact]
+    public void Build_HyMt2_Translate_UsesReadmeInstructionAndMarkers()
+    {
+        const string text = "나중에 또 연락할게~";
+        string prompt = PromptBuilder.Build(ForgeTask.TranslateKrToEn, text, ModelFamily.HyMt2);
+
+        Assert.Equal(
+            "<|hy_begin_of_sentence|><|hy_User|>" +
+            "Translate the following segment into English, without additional explanation:" +
+            text +
+            "<|hy_Assistant|>",
+            prompt);
+    }
+
+    [Fact]
+    public void Build_HyMt2_OtherTasks_UsesSystemPrompt()
+    {
+        const string text = "오늘 날씨가 좋다.";
+        string prompt = PromptBuilder.Build(ForgeTask.Proofread, text, ModelFamily.HyMt2);
+
+        Assert.Equal(
+            "<|hy_begin_of_sentence|><|hy_User|>" +
+            PromptBuilder.SystemPrompt(ForgeTask.Proofread) + " " +
+            text +
+            "<|hy_Assistant|>",
+            prompt);
+    }
+
+    [Fact]
+    public void Build_Gemma4Family_IsUnchanged()
+    {
+        Assert.Equal(PromptBuilder.Build(ForgeTask.Rewrite, "abc"),
+                     PromptBuilder.Build(ForgeTask.Rewrite, "abc", ModelFamily.Gemma4));
+    }
 }

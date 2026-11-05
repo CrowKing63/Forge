@@ -104,11 +104,12 @@ if (preview.Length > 100) preview = preview[..100] + "…";
 Console.WriteLine($"[capture] {selected.Length} chars / {inputTokens} tokens: \"{preview}\"");
 
 // ---- prompt assembly (S3) ----
-string prompt = PromptBuilder.Build(task, selected);
+var family = ModelProfile.Detect(path);
+string prompt = PromptBuilder.Build(task, selected, family);
 
 // ---- output budget: exact context size minus the exact prompt size, with a margin ----
 int promptTokens = engine.CountTokens(prompt);
-int maxTokens = Math.Max(16, engine.ContextSize - promptTokens - 256);
+int maxTokens = ModelProfile.MaxOutputTokens(family, Math.Max(16, engine.ContextSize - promptTokens - 256));
 
 // ---- streaming inference (S1) ----
 Console.Write("[out] ");
@@ -128,7 +129,7 @@ swInfer.Stop();
 Console.WriteLine();
 
 // ---- result parsing and display (S3) ----
-var result = ResultParser.Parse(sb.ToString(), selected, task);
+var result = ResultParser.Parse(OutputPostProcessor.Clean(sb.ToString(), family), selected, task);
 if (result.IsEmpty)
 {
     Console.Error.WriteLine("[error] The model returned no usable output.");
@@ -222,19 +223,20 @@ static async Task<int> RunEval(string[] args)
         return 1;
     }
 
+    var family = ModelProfile.Detect(path);
     var report = new System.Text.StringBuilder();
     int failures = 0;
     foreach (var (id, task, input, expected) in items)
     {
-        string prompt = PromptBuilder.Build(task, input);
+        string prompt = PromptBuilder.Build(task, input, family);
         int promptTokens = engine.CountTokens(prompt);
-        int maxTokens = Math.Max(16, engine.ContextSize - promptTokens - 256);
+        int maxTokens = ModelProfile.MaxOutputTokens(family, Math.Max(16, engine.ContextSize - promptTokens - 256));
 
         var sb = new System.Text.StringBuilder();
         await foreach (var token in engine.Complete(prompt, maxTokens: maxTokens))
             sb.Append(token);
 
-        var result = ResultParser.Parse(sb.ToString(), input, task);
+        var result = ResultParser.Parse(OutputPostProcessor.Clean(sb.ToString(), family), input, task);
         var problems = new List<string>();
         if (result.IsEmpty) problems.Add("empty output");
         if (result.HasError) problems.Add("refusal/error markers");

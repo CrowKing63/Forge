@@ -46,6 +46,7 @@ public partial class App : Application
     private System.Threading.Timer? _idleTimer;
     private string _modelPath = "";
     private int _gpuLayers;
+    private HardwareInfo? _hardware;
     private TaskbarIcon? _tray;
     private HotkeyManager? _hotkeys;
     private ProcessingGuard _guard = new();
@@ -83,6 +84,7 @@ public partial class App : Application
         // S8: detect hardware before any native load (LLamaSharp locks its runtime selection
         // on the first load) and resolve the GPU layer count from the settings choice.
         var hardware = HardwareDetector.Detect();
+        _hardware = hardware;
         DebugLog.Write($"hardware: {hardware.Note}");
         _gpuLayers = ResolveGpuLayerCount(_settings.Hardware, hardware, modelPath);
         DebugLog.Write($"gpu layer count: {_gpuLayers} (mode: {_settings.Hardware})");
@@ -298,9 +300,10 @@ public partial class App : Application
             };
             window.Show();
 
-            var prompt = PromptBuilder.Build(task, selected);
+            var family = ModelProfile.Detect(_modelPath);
+            var prompt = PromptBuilder.Build(task, selected, family);
             var promptTokens = engine.CountTokens(prompt);
-            var maxTokens = Math.Max(16, engine.ContextSize - promptTokens - 256);
+            var maxTokens = ModelProfile.MaxOutputTokens(family, Math.Max(16, engine.ContextSize - promptTokens - 256));
 
             var sb = new System.Text.StringBuilder();
             await foreach (var token in engine.Complete(prompt, maxTokens: maxTokens, cts.Token))
@@ -309,7 +312,7 @@ public partial class App : Application
                 window.AppendToken(token);
             }
 
-            var result = ResultParser.Parse(sb.ToString(), selected, task);
+            var result = ResultParser.Parse(OutputPostProcessor.Clean(sb.ToString(), family), selected, task);
             window.Complete(result);
             _idle?.NotifyInferenceCompleted(); // S8: reset the idle-unload timer
             status = result.IsEmpty ? "No usable output" : "Done — result ready";
@@ -399,16 +402,17 @@ public partial class App : Application
             selected = capture.Capture(selected); // validates the token limit
 
             // 2. Inference.
-            var prompt = PromptBuilder.Build(task, selected);
+            var family = ModelProfile.Detect(_modelPath);
+            var prompt = PromptBuilder.Build(task, selected, family);
             var promptTokens = engine.CountTokens(prompt);
-            var maxTokens = Math.Max(16, engine.ContextSize - promptTokens - 256);
+            var maxTokens = ModelProfile.MaxOutputTokens(family, Math.Max(16, engine.ContextSize - promptTokens - 256));
             DebugLog.Write($"direct '{task}' inference started ({promptTokens} prompt tokens)");
             var sb = new System.Text.StringBuilder();
             await foreach (var token in engine.Complete(prompt, maxTokens: maxTokens, CancellationToken.None))
                 sb.Append(token);
             DebugLog.Write($"direct '{task}' inference done ({sb.Length} chars)");
 
-            var result = ResultParser.Parse(sb.ToString(), selected, task);
+            var result = ResultParser.Parse(OutputPostProcessor.Clean(sb.ToString(), family), selected, task);
             _idle?.NotifyInferenceCompleted(); // S8: reset the idle-unload timer
 
             if (result.IsEmpty)
@@ -591,7 +595,7 @@ public partial class App : Application
         return image;
     }
 
-    private async Task LoadModelAsync(string modelPath)
+    private async Task<bool> LoadModelAsync(string modelPath)
     {
         // S10 first-run onboarding: when the configured model file is missing, download
         // it (with progress + resume via S9) before attempting to load.
@@ -606,11 +610,13 @@ public partial class App : Application
                 SetState(ModelState.Ready, "Forge: ready (GPU unavailable — using CPU)");
             else
                 SetState(ModelState.Ready, "Forge: ready");
+            return true;
         }
         catch (Exception ex)
         {
             DebugLog.Write($"model failed to load at startup: {ex}");
             SetState(ModelState.Error, $"Forge: model failed to load — {ex.Message}. Open Settings to check the model path.");
+            return false;
         }
     }
 
@@ -632,7 +638,28 @@ public partial class App : Application
 
     private void OnOpenSettings(object sender, RoutedEventArgs e)
     {
-        new SettingsWindow().Show();
+        new SettingsWindow(SwapModelAsync).Show();
+    }
+
+    /// <summary>
+    /// Hot-swaps the loaded model without a restart (S9): unloads the current model,
+    /// re-resolves GPU layers for the new file, and loads it. Refused while a task is
+    /// running. Returns true on success so the settings window can report the outcome.
+    /// </summary>
+    private async Task<bool> SwapModelAsync(string newPath)
+    {
+        if (_guard.IsProcessing)
+        {
+            SetState(ModelState.Error, "Cannot switch model while a task is running.");
+            return false;
+        }
+
+        _modelPath = newPath;
+        _gpuLayers = ResolveGpuLayerCount(_settings.Hardware, _hardware!, newPath);
+        DebugLog.Write($"model swap: {newPath} (gpu layers: {_gpuLayers})");
+
+        await Task.Run(() => _engine!.Unload());
+        return await LoadModelAsync(newPath);
     }
 
     // ---- S12: global exception handling (plan §7 — a fatal exception ends the app) ----
