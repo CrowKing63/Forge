@@ -287,6 +287,8 @@ public partial class App : Application
             {
                 var replaceResult = ReplaceAction.TryReplace(text, _sourceWindow);
                 DebugLog.Write($"replace: {replaceResult.Outcome} — {replaceResult.Message}");
+                if (replaceResult.Outcome == ReplaceAction.Outcome.Replaced)
+                    PlayClang(); // the forge's hammer strike
                 window.ReportReplace(replaceResult);
             };
             window.Show();
@@ -434,7 +436,9 @@ public partial class App : Application
             }
             DebugLog.Write($"direct '{task}' finished: {replaceResult.Outcome} — {replaceResult.Message} ({replaceResult.Diagnostics})");
 
-            if (replaceResult.Outcome != ReplaceAction.Outcome.Replaced)
+            if (replaceResult.Outcome == ReplaceAction.Outcome.Replaced)
+                PlayClang(); // the forge's hammer strike
+            else
                 MessageBox.Show(replaceResult.Message, "Forge", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         catch (TextCaptureException ex)
@@ -452,6 +456,27 @@ public partial class App : Application
         {
             SetState(ModelState.Ready, "Forge: ready");
             _guard.End();
+        }
+    }
+
+    /// <summary>
+    /// Plays the "clang" strike on a successful replace — the forge's hammer hitting the anvil.
+    /// Best-effort: a missing file or audio failure never interrupts a translation.
+    /// </summary>
+    private static void PlayClang()
+    {
+        try
+        {
+            var path = Path.Combine(AppContext.BaseDirectory, "Assets", "clang.wav");
+            if (!File.Exists(path))
+                return;
+            // SoundPlayer.Play() is async (returns immediately); the object stays alive for the
+            // duration of the short clip and is collected by GC afterwards.
+            new System.Media.SoundPlayer(path).Play();
+        }
+        catch (Exception ex)
+        {
+            DebugLog.Write($"clang: failed to play — {ex.Message}");
         }
     }
 
