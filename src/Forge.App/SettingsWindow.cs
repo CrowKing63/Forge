@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -10,7 +11,8 @@ using Forge.Core;
 namespace Forge.App;
 
 /// <summary>
-/// Settings window (S7), code-only WPF. Tabs: Model / Engine / Hardware / Prompts / Hotkeys.
+/// Settings window (S7), code-only WPF. Left sidebar sections: Model / Engine / Hardware /
+/// Prompts / Hotkeys (Handy-style layout: nav column left, scrollable content right).
 ///
 /// Persists to <see cref="ForgeSettings"/> (JSON under %LOCALAPPDATA%\Forge). The hotkey tab
 /// is the source of truth the hotkey layer (S6) reads from; the model tab lists every GGUF
@@ -37,6 +39,10 @@ public sealed class SettingsWindow : Window
     private TextBox _popupBox = null!;
     private readonly Dictionary<ForgeTask, TextBox> _immediateBoxes = new();
     private TextBlock _status = null!;
+    private Border[] _navItems = null!;
+    private UIElement[] _sections = null!;
+    private ContentControl _contentHost = null!;
+    private bool _loading;
 
     /// <summary>One dropdown entry: a catalog model plus its file path.</summary>
     private sealed record ModelChoice(ModelInfo Info, string Path)
@@ -56,7 +62,7 @@ public sealed class SettingsWindow : Window
         _applyModel = applyModel;
         _originalModelPath = _settings.ModelPath;
         Title = "Forge Settings";
-        Width = 560;
+        Width = 720;
         Height = 640;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         Background = ForgeTheme.BackgroundBrush;
@@ -64,8 +70,10 @@ public sealed class SettingsWindow : Window
         FontFamily = new FontFamily("Segoe UI");
         FontSize = 13;
         Resources = ForgeTheme.Build();
-        BuildTabs();
-        PopulateFromSettings();
+        BuildLayout();
+        _loading = true;
+        try { PopulateFromSettings(); }
+        finally { _loading = false; }
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -76,86 +84,168 @@ public sealed class SettingsWindow : Window
         DwmSetWindowAttribute(new WindowInteropHelper(this).Handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref useDark, sizeof(int));
     }
 
-    private void BuildTabs()
+    protected override void OnClosing(CancelEventArgs e)
     {
-        var root = new Grid { Margin = new Thickness(16, 12, 16, 12) };
-        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        // Persist any last edit (e.g. a focused field that never lost focus) before the
+        // window goes away; closing does not quit the app — it lives on in the tray.
+        TryAutoSave();
+        base.OnClosing(e);
+    }
 
-        var tabs = new TabControl();
-        tabs.Items.Add(MakeModelTab());
-        tabs.Items.Add(MakeEngineTab());
-        tabs.Items.Add(MakeHardwareTab());
-        tabs.Items.Add(MakePromptsTab());
-        tabs.Items.Add(MakeHotkeysTab());
-        Grid.SetRow(tabs, 0);
-        root.Children.Add(tabs);
+    private void BuildLayout()
+    {
+        var root = new Grid();
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(180) });
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        // Left sidebar (Handy pattern): a right-bordered strip of rounded nav rows; the
+        // selected section renders in a scrollable content area on the right.
+        var sidebar = new Border
+        {
+            BorderBrush = ForgeTheme.BorderBrush,
+            BorderThickness = new Thickness(0, 0, 1, 0),
+            Padding = new Thickness(10),
+        };
+        Grid.SetColumn(sidebar, 0);
+
+        string[] names = { "Model", "Engine", "Hardware", "Prompts", "Hotkeys" };
+        _sections = new UIElement[5]
+        {
+            MakeModelSection(),
+            MakeEngineSection(),
+            MakeHardwareSection(),
+            MakePromptsSection(),
+            MakeHotkeysSection(),
+        };
+        _navItems = new Border[5];
+
+        var nav = new StackPanel();
+        for (int i = 0; i < names.Length; i++)
+        {
+            int index = i;
+            var item = MakeNavItem(names[index]);
+            item.MouseLeftButtonUp += (_, _) => SelectSection(index);
+            _navItems[i] = item;
+            nav.Children.Add(item);
+        }
+        sidebar.Child = nav;
+        root.Children.Add(sidebar);
+
+        var contentArea = new Grid { Margin = new Thickness(16, 12, 16, 12) };
+        contentArea.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        contentArea.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        _contentHost = new ContentControl();
+        scroll.Content = _contentHost;
+        Grid.SetRow(scroll, 0);
+        contentArea.Children.Add(scroll);
 
         var bottom = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 12, 0, 0) };
         _status = new TextBlock
         {
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(0, 0, 12, 0),
             Foreground = ForgeTheme.MutedBrush,
             TextWrapping = TextWrapping.Wrap,
         };
         bottom.Children.Add(_status);
 
-        var saveButton = new Button
-        {
-            Content = "Save",
-            HorizontalAlignment = HorizontalAlignment.Right,
-            MinWidth = 90,
-            Style = (Style)Resources["AccentButton"],
-        };
-        saveButton.Click += OnSave;
-        bottom.Children.Add(saveButton);
-
         Grid.SetRow(bottom, 1);
-        root.Children.Add(bottom);
+        contentArea.Children.Add(bottom);
+
+        Grid.SetColumn(contentArea, 1);
+        root.Children.Add(contentArea);
 
         Content = root;
+        SelectSection(0);
     }
 
-    private TabItem MakeModelTab()
+    /// <summary>A rounded nav row in the sidebar: subtle fill when active, hover tint otherwise.</summary>
+    private static Border MakeNavItem(string text)
+    {
+        var label = new TextBlock
+        {
+            Text = text,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = ForgeTheme.MutedBrush,
+        };
+        var item = new Border
+        {
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(12, 8, 12, 8),
+            Margin = new Thickness(0, 3, 0, 3),
+            Background = Brushes.Transparent,
+            Child = label,
+        };
+        item.MouseEnter += (_, _) =>
+        {
+            if (item.Background == Brushes.Transparent) item.Background = ForgeTheme.HoverFieldBrush;
+        };
+        item.MouseLeave += (_, _) =>
+        {
+            if (item.Background != ForgeTheme.FieldBrush) item.Background = Brushes.Transparent;
+        };
+        return item;
+    }
+
+    private void SelectSection(int index)
+    {
+        _contentHost.Content = _sections[index];
+        for (int i = 0; i < _navItems.Length; i++)
+        {
+            bool active = i == index;
+            _navItems[i].Background = active ? ForgeTheme.FieldBrush : Brushes.Transparent;
+            ((TextBlock)_navItems[i].Child).Foreground = active ? ForgeTheme.TextBrush : ForgeTheme.MutedBrush;
+        }
+    }
+
+    private UIElement MakeModelSection()
     {
         var panel = new StackPanel();
 
         // S9: the models dropdown lists every GGUF in the models directory. No manual
         // path entry — dropping a file into the folder makes it appear here.
         _modelBox = new ThemedComboBox { Margin = new Thickness(0, 4, 0, 0) };
+        _modelBox.SelectionChanged += (_, _) => TryAutoSave();
         panel.Children.Add(MakeLabel("Model"));
         panel.Children.Add(_modelBox);
         panel.Children.Add(MakeHint("Drop .gguf files into the models folder to add them; pick one here."));
 
-        return MakeTab("Model", MakeCard(panel));
+        return MakeCard(panel);
     }
 
-    private TabItem MakeEngineTab()
+    private UIElement MakeEngineSection()
     {
         var panel = new StackPanel();
         _contextBox = new TextBox { Margin = new Thickness(0, 4, 0, 12), Width = 140 };
+        _contextBox.LostFocus += (_, _) => TryAutoSave();
         panel.Children.Add(MakeLabel("Context size (tokens)"));
         panel.Children.Add(_contextBox);
 
         _idleBox = new TextBox { Margin = new Thickness(0, 4, 0, 12), Width = 140 };
+        _idleBox.LostFocus += (_, _) => TryAutoSave();
         panel.Children.Add(MakeLabel("Idle unload (seconds)"));
         panel.Children.Add(MakeHint("The model is unloaded after this much idle time and reloaded on demand."));
         panel.Children.Add(_idleBox);
 
         _crashDumpCheck = new CheckBox { Margin = new Thickness(0, 4, 0, 0), Content = "Write crash dumps on fatal errors" };
+        _crashDumpCheck.Checked += (_, _) => TryAutoSave();
+        _crashDumpCheck.Unchecked += (_, _) => TryAutoSave();
         panel.Children.Add(_crashDumpCheck);
         panel.Children.Add(MakeHint("Dumps record the stack and model path only — no text content."));
 
-        return MakeTab("Engine", MakeCard(panel));
+        return MakeCard(panel);
     }
 
-    private TabItem MakeHardwareTab()
+    private UIElement MakeHardwareSection()
     {
         var panel = new StackPanel();
         _cpuRadio = MakeRadio("CPU");
         _gpuRadio = MakeRadio("GPU");
         _autoRadio = MakeRadio("Auto");
+        _cpuRadio.Checked += (_, _) => TryAutoSave();
+        _gpuRadio.Checked += (_, _) => TryAutoSave();
+        _autoRadio.Checked += (_, _) => TryAutoSave();
         panel.Children.Add(_cpuRadio);
         panel.Children.Add(_gpuRadio);
         panel.Children.Add(_autoRadio);
@@ -171,10 +261,10 @@ public sealed class SettingsWindow : Window
             detectionText = "Hardware detection unavailable.";
         }
         panel.Children.Add(MakeHint(detectionText));
-        return MakeTab("Hardware", MakeCard(panel));
+        return MakeCard(panel);
     }
 
-    private TabItem MakePromptsTab()
+    private UIElement MakePromptsSection()
     {
         var panel = new StackPanel();
         panel.Children.Add(MakeHint("System prompts sent with each task. Leave them as-is unless you know what you are changing."));
@@ -188,19 +278,21 @@ public sealed class SettingsWindow : Window
                 Margin = new Thickness(0, 12, 0, 0),
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             };
+            box.LostFocus += (_, _) => TryAutoSave();
             panel.Children.Add(MakeLabel(task.ToString()));
             panel.Children.Add(box);
             _promptBoxes[task] = box;
         }
-        return MakeTab("Prompts", MakeCard(panel));
+        return MakeCard(panel);
     }
 
-    private TabItem MakeHotkeysTab()
+    private UIElement MakeHotkeysSection()
     {
         var panel = new StackPanel();
         panel.Children.Add(MakeHint("Bindings use the form Ctrl+Shift+E. Leave a field empty to unbind it."));
 
         _popupBox = new TextBox { Margin = new Thickness(0, 4, 0, 12), Width = 180 };
+        _popupBox.LostFocus += (_, _) => TryAutoSave();
         panel.Children.Add(MakeLabel("Open overlay (popup)"));
         panel.Children.Add(_popupBox);
 
@@ -208,17 +300,16 @@ public sealed class SettingsWindow : Window
         foreach (var task in Enum.GetValues<ForgeTask>())
         {
             var box = new TextBox { Margin = new Thickness(0, 4, 0, 12), Width = 180 };
+            box.LostFocus += (_, _) => TryAutoSave();
             panel.Children.Add(MakeLabel(task.ToString()));
             panel.Children.Add(box);
             _immediateBoxes[task] = box;
         }
 
-        return MakeTab("Hotkeys", MakeCard(panel));
+        return MakeCard(panel);
     }
 
-    private static TabItem MakeTab(string header, UIElement content) => new() { Header = header, Content = content };
-
-    /// <summary>A card: the subtle surface every tab's controls sit on.</summary>
+    /// <summary>A card: the subtle surface every section's controls sit on.</summary>
     private static Border MakeCard(UIElement content) => new()
     {
         Background = ForgeTheme.CardBrush,
@@ -297,8 +388,13 @@ public sealed class SettingsWindow : Window
                 box.Text = HotkeyText(h.Binding);
     }
 
-    private void OnSave(object sender, RoutedEventArgs e)
+    /// <summary>
+    /// Validates the current field values and persists them; reports via the status line.
+    /// Called on every control change (auto-save) and when the window closes.
+    /// </summary>
+    private void TryAutoSave()
     {
+        if (_loading) return;
         if (!int.TryParse(_contextBox.Text, out int contextSize) || contextSize <= 0)
         {
             SetStatus("Context size must be a positive number.");

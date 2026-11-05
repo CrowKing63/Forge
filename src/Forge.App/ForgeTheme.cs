@@ -1,7 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
-using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using Controls = System.Windows.Controls;
@@ -35,8 +34,6 @@ public static class ForgeTheme
         var resources = new ResourceDictionary();
         resources.Add(typeof(TextBlock), TextBlockStyle());
         resources.Add("HintText", HintTextStyle());
-        resources.Add(typeof(TabControl), TabControlStyle());
-        resources.Add(typeof(TabItem), TabItemStyle());
         resources.Add(typeof(TextBox), TextBoxStyle());
         // Keyed by the exact runtime type: WPF implicit styles do not walk the type
         // hierarchy, so a typeof(ComboBox) key would never match ThemedComboBox.
@@ -71,75 +68,6 @@ public static class ForgeTheme
             new Setter(TextBlock.TextWrappingProperty, TextWrapping.Wrap),
         },
     };
-
-    private static Style TabControlStyle()
-    {
-        // Flat tab strip + selected-content host; no chrome of its own.
-        var tabs = new FrameworkElementFactory(typeof(ItemsPresenter));
-        tabs.SetValue(DockPanel.DockProperty, Dock.Top);
-
-        var content = new FrameworkElementFactory(typeof(ContentPresenter)) { Name = "PART_SelectedContentHost" };
-
-        var dock = new FrameworkElementFactory(typeof(DockPanel));
-        dock.AppendChild(tabs);
-        dock.AppendChild(content);
-
-        return new Style(typeof(TabControl))
-        {
-            Setters =
-            {
-                new Setter(Controls.Control.BackgroundProperty, Brushes.Transparent),
-                new Setter(Controls.Control.TemplateProperty, new ControlTemplate(typeof(TabControl)) { VisualTree = dock }),
-            },
-        };
-    }
-
-    private static Style TabItemStyle()
-    {
-        var underline = new FrameworkElementFactory(typeof(Rectangle)) { Name = "Underline" };
-        underline.SetValue(Shape.FillProperty, AccentBrush);
-        underline.SetValue(FrameworkElement.HeightProperty, 2.0);
-        underline.SetValue(Rectangle.RadiusXProperty, 1.0);
-        underline.SetValue(Rectangle.RadiusYProperty, 1.0);
-        underline.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Bottom);
-        underline.SetValue(FrameworkElement.VisibilityProperty, Visibility.Collapsed);
-
-        var header = new FrameworkElementFactory(typeof(ContentPresenter));
-        header.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
-
-        var grid = new FrameworkElementFactory(typeof(Grid));
-        grid.AppendChild(header);
-        grid.AppendChild(underline);
-
-        var border = new FrameworkElementFactory(typeof(Border));
-        border.SetValue(Controls.Control.PaddingProperty, new Thickness(14, 9, 14, 9));
-        border.SetValue(Controls.Control.BackgroundProperty, Brushes.Transparent);
-        border.AppendChild(grid);
-
-        var template = new ControlTemplate(typeof(TabItem)) { VisualTree = border };
-
-        var selected = new Trigger { Property = TabItem.IsSelectedProperty, Value = true };
-        selected.Setters.Add(new Setter(Controls.Control.ForegroundProperty, TextBrush));
-        selected.Setters.Add(new Setter(FrameworkElement.VisibilityProperty, Visibility.Visible) { TargetName = "Underline" });
-        template.Triggers.Add(selected);
-
-        var hover = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
-        hover.Setters.Add(new Setter(Controls.Control.ForegroundProperty, TextBrush));
-        template.Triggers.Add(hover);
-
-        var disabled = new Trigger { Property = UIElement.IsEnabledProperty, Value = false };
-        disabled.Setters.Add(new Setter(Controls.Control.ForegroundProperty, MutedBrush));
-        template.Triggers.Add(disabled);
-
-        return new Style(typeof(TabItem))
-        {
-            Setters =
-            {
-                new Setter(Controls.Control.ForegroundProperty, MutedBrush),
-                new Setter(Controls.Control.TemplateProperty, template),
-            },
-        };
-    }
 
     private static Style TextBoxStyle()
     {

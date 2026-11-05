@@ -67,6 +67,31 @@ internal static class Program
                 settings.Show();
                 await Task.Delay(800);
 
+                // --- Sidebar layout check (Handy pattern) ---
+                var sidebar = (settings.Content as Grid)?.Children[0] as Border;
+                if (sidebar is null) throw new Exception("sidebar not found");
+                var navTexts = AllTextBlocks(sidebar).Where(t => t.Text is "Model" or "Engine" or "Hardware" or "Prompts" or "Hotkeys").ToList();
+                Log($"nav items found: {navTexts.Count}");
+                if (navTexts.Count != 5) throw new Exception("expected 5 sidebar nav items");
+
+                // The window's ScrollViewer is a ContentControl subclass, so this finds it;
+                // its .Content is our section host.
+                var winScroll = FindVisual<ScrollViewer>(settings);
+                if (winScroll is null) throw new Exception("window ScrollViewer not found");
+                if ((winScroll.Content as ContentControl)?.Content is null)
+                    throw new Exception("content host should show the Model section on load");
+
+                // --- Window-level scroll check: shrink the window until content overflows ---
+                settings.Height = 180;
+                await Task.Delay(500);
+                Log($"window scroll: viewport={winScroll.ViewportHeight:F1} extent={winScroll.ExtentHeight:F1} scrollable={winScroll.ScrollableHeight:F1}");
+                if (winScroll.ScrollableHeight <= 0) throw new Exception("content should overflow at height 180");
+                var offsetBefore = winScroll.VerticalOffset;
+                winScroll.ScrollToVerticalOffset(winScroll.ExtentHeight);
+                await Task.Delay(300);
+                Log($"window scroll test: offset before={offsetBefore:F1} after={winScroll.VerticalOffset:F1}");
+                if (winScroll.VerticalOffset <= 0) throw new Exception("scroll offset did not move");
+
                 var combo = FindVisual<ThemedComboBox>(settings);
                 if (combo is null) throw new Exception("ThemedComboBox not found in visual tree");
                 Log($"found ThemedComboBox, items: {combo.Items.Count}");
@@ -156,7 +181,32 @@ internal static class Program
                 foreach (var t in AllTextBlocks(combo).Take(3))
                     Log($"  closed-field text '{t.Text[..Math.Min(24, t.Text.Length)]}' foreground={BrushName(TextElement.GetForeground(t))}");
 
+                // --- Auto-save on change: raise LostFocus on a field and verify the file updates ---
+                string cfg = Forge.Core.ForgeSettings.DefaultConfigPath;
+                var ctxField = typeof(SettingsWindow).GetField("_contextBox",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                var ctxBox = (TextBox)ctxField!.GetValue(settings)!;
+                string originalContext = ctxBox.Text;
+                ctxBox.Text = "4096";
+                ctxBox.RaiseEvent(new RoutedEventArgs(TextBox.LostFocusEvent));
+                await Task.Delay(300);
+                var cfgChanged = File.ReadAllText(cfg);
+                Log($"change-save: context updated={cfgChanged.Contains("\"ContextSize\": 4096")}");
+                if (!cfgChanged.Contains("\"ContextSize\": 4096")) throw new Exception("LostFocus should auto-save the context size");
+
+                // Restore the original value so the probe leaves the user's settings untouched.
+                ctxBox.Text = originalContext;
+                ctxBox.RaiseEvent(new RoutedEventArgs(TextBox.LostFocusEvent));
+                await Task.Delay(300);
+
+                // --- Auto-save on close: closing must persist the settings file ---
+                var cfgBefore = File.Exists(cfg) ? File.ReadAllText(cfg) : "";
                 settings.Close();
+                await Task.Delay(300);
+                var cfgAfter = File.Exists(cfg) ? File.ReadAllText(cfg) : "";
+                Log($"close-save: persisted={cfgAfter.Length > 0} values-unchanged={cfgBefore == cfgAfter}");
+                if (cfgAfter.Length == 0) throw new Exception("closing the window should persist settings");
+
                 Log("probe succeeded");
                 tcs.SetResult(null);
             }
