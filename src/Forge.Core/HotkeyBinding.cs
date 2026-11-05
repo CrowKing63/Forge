@@ -26,7 +26,7 @@ public sealed record HotkeyBinding(int Modifiers, int Key)
     /// </summary>
     public static bool TryParse(string text, out HotkeyBinding binding)
     {
-        binding = default;
+        binding = new HotkeyBinding(0, 0);
         if (string.IsNullOrWhiteSpace(text))
             return false;
 

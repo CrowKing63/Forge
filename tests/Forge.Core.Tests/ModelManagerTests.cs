@@ -190,7 +190,7 @@ public class ModelManagerTests : IDisposable
         File.WriteAllBytes(Path.Combine(_dir, ModelManager.DefaultModelId + ".gguf"), new byte[] { 1 });
         var manager = new ModelManager(_dir);
 
-        Assert.Single(manager.ListModels().Where(m => m.Id == ModelManager.DefaultModelId));
+        Assert.Single(manager.ListModels(), m => m.Id == ModelManager.DefaultModelId);
     }
 
     [Fact]
@@ -205,14 +205,14 @@ public class ModelManagerTests : IDisposable
     }
 
     [Fact]
-    public void ProgressReportsGrowingByteCount()
+    public async Task ProgressReportsGrowingByteCount()
     {
         var payload = Enumerable.Range(1, 2048).Select(i => (byte)i).ToArray();
         var model = new ModelInfo("prog-model", "Prog", "Q4_0", payload.Length, Sha256(payload), "http://fake/model.gguf");
         var progress = new List<DownloadProgress>();
         var manager = new ModelManager(_dir, new HttpClient(new FakeHttpHandler(_ => Response(payload))));
 
-        manager.DownloadAsync(model, progress: new SyncProgress<DownloadProgress>(progress.Add)).GetAwaiter().GetResult();
+        await manager.DownloadAsync(model, progress: new SyncProgress<DownloadProgress>(progress.Add));
 
         Assert.NotEmpty(progress);
         Assert.Equal(payload.Length, progress[^1].BytesReceived);

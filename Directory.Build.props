@@ -1,0 +1,11 @@
+<Project>
+
+  <!-- DiffPlex 1.1.0 declares only .NET Framework TFMs in its nuspec, so NuGet restores
+       the net481 asset and emits NU1701 ("may not be fully compatible") in every project
+       that pulls it in — directly (Forge.Core) or transitively (App, Cli, tests). The
+       package is pure managed IL and runs fine on net10.0; suppress the noise repo-wide. -->
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);NU1701</NoWarn>
+  </PropertyGroup>
+
+</Project>

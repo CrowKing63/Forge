@@ -113,7 +113,7 @@ public partial class App : Application
     {
         await Task.Delay(1500); // let startup finish so tray, hotkeys, and the engine exist
         _settings.CrashDumpEnabled = true;
-        Dispatcher.BeginInvoke(() => throw new InvalidOperationException("smoke crash (S12 verification)"));
+        _ = Dispatcher.BeginInvoke(() => throw new InvalidOperationException("smoke crash (S12 verification)")); // fire-and-forget: the dispatcher op is intentionally not awaited
     }
 
     /// <summary>Maps the settings' hardware choice to a GPU layer count via detection.</summary>
@@ -157,7 +157,7 @@ public partial class App : Application
         _hotkeys.HotkeyPressed += OnHotkeyPressed;
 
         if (!HotkeyBinding.TryParse(popupBinding, out var popup))
-            popup = default(HotkeyBinding); // unreachable: the default always parses
+            popup = new HotkeyBinding(0, 0); // unreachable: the default always parses
         if (_hotkeys.Register(PopupHotkeyId, popup.Modifiers, popup.Key))
             DebugLog.Write($"registered popup hotkey '{popupBinding}'");
         else
