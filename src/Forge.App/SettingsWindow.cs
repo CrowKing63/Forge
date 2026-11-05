@@ -1,7 +1,9 @@
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Interop;
 using System.Windows.Media;
 using Forge.Core;
 
@@ -14,6 +16,9 @@ namespace Forge.App;
 /// is the source of truth the hotkey layer (S6) reads from; the model tab lists every GGUF
 /// in the models directory (<see cref="ModelManager.DefaultModelsDir"/>) and, when the app
 /// supplies <paramref name="applyModel"/>, hot-swaps the loaded model on save — no restart.
+///
+/// Visuals: Forge's dark theme (<see cref="ForgeTheme"/>), applied via window resources;
+/// each tab is a description line over a card of controls.
 /// </summary>
 public sealed class SettingsWindow : Window
 {
@@ -54,13 +59,26 @@ public sealed class SettingsWindow : Window
         Width = 560;
         Height = 640;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        Background = ForgeTheme.BackgroundBrush;
+        Foreground = ForgeTheme.TextBrush;
+        FontFamily = new FontFamily("Segoe UI");
+        FontSize = 13;
+        Resources = ForgeTheme.Build();
         BuildTabs();
         PopulateFromSettings();
     }
 
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        // Dark title bar on Windows 11 (and Win10 2000+); a harmless no-op elsewhere.
+        int useDark = 1;
+        DwmSetWindowAttribute(new WindowInteropHelper(this).Handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref useDark, sizeof(int));
+    }
+
     private void BuildTabs()
     {
-        var root = new Grid { Margin = new Thickness(8) };
+        var root = new Grid { Margin = new Thickness(16, 12, 16, 12) };
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
@@ -73,20 +91,22 @@ public sealed class SettingsWindow : Window
         Grid.SetRow(tabs, 0);
         root.Children.Add(tabs);
 
-        var bottom = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
+        var bottom = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 12, 0, 0) };
         _status = new TextBlock
         {
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 0, 12, 0),
-            Foreground = Brushes.DimGray,
+            Foreground = ForgeTheme.MutedBrush,
+            TextWrapping = TextWrapping.Wrap,
         };
         bottom.Children.Add(_status);
 
         var saveButton = new Button
         {
             Content = "Save",
-            Padding = new Thickness(16, 4, 16, 4),
             HorizontalAlignment = HorizontalAlignment.Right,
+            MinWidth = 90,
+            Style = (Style)Resources["AccentButton"],
         };
         saveButton.Click += OnSave;
         bottom.Children.Add(saveButton);
@@ -97,41 +117,42 @@ public sealed class SettingsWindow : Window
         Content = root;
     }
 
-    private static TabItem MakeTab(string header, UIElement content) => new() { Header = header, Content = content };
-
     private TabItem MakeModelTab()
     {
-        var panel = new StackPanel { Margin = new Thickness(8) };
+        var panel = new StackPanel();
 
         // S9: the models dropdown lists every GGUF in the models directory. No manual
         // path entry — dropping a file into the folder makes it appear here.
-        _modelBox = new ComboBox { Margin = new Thickness(0, 4, 0, 12), MinWidth = 360 };
-        panel.Children.Add(MakeLabel($"Model (from {ModelManager.DefaultModelsDir}):"));
+        _modelBox = new ThemedComboBox { Margin = new Thickness(0, 4, 0, 0) };
+        panel.Children.Add(MakeLabel("Model"));
         panel.Children.Add(_modelBox);
+        panel.Children.Add(MakeHint("Drop .gguf files into the models folder to add them; pick one here."));
 
-        return MakeTab("Model", panel);
+        return MakeTab("Model", MakeCard(panel));
     }
 
     private TabItem MakeEngineTab()
     {
-        var panel = new StackPanel { Margin = new Thickness(8) };
-        _contextBox = new TextBox { Margin = new Thickness(0, 4, 0, 12), Width = 120 };
-        panel.Children.Add(MakeLabel("Context size (tokens):"));
+        var panel = new StackPanel();
+        _contextBox = new TextBox { Margin = new Thickness(0, 4, 0, 12), Width = 140 };
+        panel.Children.Add(MakeLabel("Context size (tokens)"));
         panel.Children.Add(_contextBox);
 
-        _idleBox = new TextBox { Margin = new Thickness(0, 4, 0, 12), Width = 120 };
-        panel.Children.Add(MakeLabel("Idle unload (seconds — model is unloaded after this much idle time):"));
+        _idleBox = new TextBox { Margin = new Thickness(0, 4, 0, 12), Width = 140 };
+        panel.Children.Add(MakeLabel("Idle unload (seconds)"));
+        panel.Children.Add(MakeHint("The model is unloaded after this much idle time and reloaded on demand."));
         panel.Children.Add(_idleBox);
 
-        _crashDumpCheck = new CheckBox { Margin = new Thickness(0, 4, 0, 12) };
-        panel.Children.Add(MakeLabel("Write crash dumps on fatal errors (no text content is recorded):"));
+        _crashDumpCheck = new CheckBox { Margin = new Thickness(0, 4, 0, 0), Content = "Write crash dumps on fatal errors" };
         panel.Children.Add(_crashDumpCheck);
-        return MakeTab("Engine", panel);
+        panel.Children.Add(MakeHint("Dumps record the stack and model path only — no text content."));
+
+        return MakeTab("Engine", MakeCard(panel));
     }
 
     private TabItem MakeHardwareTab()
     {
-        var panel = new StackPanel { Margin = new Thickness(8) };
+        var panel = new StackPanel();
         _cpuRadio = MakeRadio("CPU");
         _gpuRadio = MakeRadio("GPU");
         _autoRadio = MakeRadio("Auto");
@@ -149,13 +170,14 @@ public sealed class SettingsWindow : Window
         {
             detectionText = "Hardware detection unavailable.";
         }
-        panel.Children.Add(MakeLabel(detectionText));
-        return MakeTab("Hardware", panel);
+        panel.Children.Add(MakeHint(detectionText));
+        return MakeTab("Hardware", MakeCard(panel));
     }
 
     private TabItem MakePromptsTab()
     {
-        var panel = new StackPanel { Margin = new Thickness(8) };
+        var panel = new StackPanel();
+        panel.Children.Add(MakeHint("System prompts sent with each task. Leave them as-is unless you know what you are changing."));
         foreach (var task in Enum.GetValues<ForgeTask>())
         {
             var box = new TextBox
@@ -163,45 +185,74 @@ public sealed class SettingsWindow : Window
                 AcceptsReturn = true,
                 TextWrapping = TextWrapping.Wrap,
                 Height = 64,
-                Margin = new Thickness(0, 4, 0, 12),
+                Margin = new Thickness(0, 12, 0, 0),
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             };
-            panel.Children.Add(MakeLabel($"{task}:"));
+            panel.Children.Add(MakeLabel(task.ToString()));
             panel.Children.Add(box);
             _promptBoxes[task] = box;
         }
-        return MakeTab("Prompts", panel);
+        return MakeTab("Prompts", MakeCard(panel));
     }
 
     private TabItem MakeHotkeysTab()
     {
-        var panel = new StackPanel { Margin = new Thickness(8) };
-        _popupBox = new TextBox { Margin = new Thickness(0, 4, 0, 12), Width = 160 };
-        panel.Children.Add(MakeLabel("Open overlay (popup):"));
+        var panel = new StackPanel();
+        panel.Children.Add(MakeHint("Bindings use the form Ctrl+Shift+E. Leave a field empty to unbind it."));
+
+        _popupBox = new TextBox { Margin = new Thickness(0, 4, 0, 12), Width = 180 };
+        panel.Children.Add(MakeLabel("Open overlay (popup)"));
         panel.Children.Add(_popupBox);
 
-        panel.Children.Add(MakeLabel("Immediate hotkeys (one task per binding; leave empty to unbind):"));
+        panel.Children.Add(MakeSectionLabel("Immediate hotkeys (one task per binding)"));
         foreach (var task in Enum.GetValues<ForgeTask>())
         {
-            var box = new TextBox { Margin = new Thickness(0, 4, 0, 12), Width = 160 };
-            panel.Children.Add(MakeLabel($"{task}:"));
+            var box = new TextBox { Margin = new Thickness(0, 4, 0, 12), Width = 180 };
+            panel.Children.Add(MakeLabel(task.ToString()));
             panel.Children.Add(box);
             _immediateBoxes[task] = box;
         }
-        panel.Children.Add(MakeLabel("These bindings are written to the hotkey config file that the hotkey layer (S6) reads."));
-        return MakeTab("Hotkeys", panel);
+
+        return MakeTab("Hotkeys", MakeCard(panel));
     }
+
+    private static TabItem MakeTab(string header, UIElement content) => new() { Header = header, Content = content };
+
+    /// <summary>A card: the subtle surface every tab's controls sit on.</summary>
+    private static Border MakeCard(UIElement content) => new()
+    {
+        Background = ForgeTheme.CardBrush,
+        CornerRadius = new CornerRadius(8),
+        Padding = new Thickness(16),
+        Margin = new Thickness(0, 4, 0, 8),
+        Child = content,
+    };
 
     private static TextBlock MakeLabel(string text) => new()
     {
         Text = text,
-        Margin = new Thickness(0, 4, 0, 2),
+        FontWeight = FontWeights.SemiBold,
+        Margin = new Thickness(0, 2, 0, 4),
+    };
+
+    private static TextBlock MakeSectionLabel(string text) => new()
+    {
+        Text = text,
+        FontWeight = FontWeights.SemiBold,
+        Margin = new Thickness(0, 8, 0, 4),
+    };
+
+    private TextBlock MakeHint(string text) => new()
+    {
+        Text = text,
+        Style = (Style)Resources["HintText"],
+        Margin = new Thickness(0, 6, 0, 0),
     };
 
     private static RadioButton MakeRadio(string content) => new()
     {
         Content = content,
-        Margin = new Thickness(0, 2, 0, 2),
+        Margin = new Thickness(0, 3, 0, 3),
     };
 
     private void PopulateFromSettings()
@@ -355,4 +406,9 @@ public sealed class SettingsWindow : Window
     }
 
     private void SetStatus(string text) => _status.Text = text;
+
+    private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 }
