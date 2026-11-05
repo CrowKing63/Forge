@@ -66,14 +66,41 @@ GGUF 메타데이터에서 추출한 채팅 템플릿:
 ```
 (Hunyuan 계열 마커. 스탑 토큰은 `<|hy_placeholder_no_2|>` — 입력에 따라 불안정하게 출력됨)
 
-## 4. 결론
+## 4. 퀀트 비교 (Q4_K_M vs Q8_0)
 
-1. **용량·속도**: Hy-MT2는 압도적으로 유리 — 파일 43%, 로드 3x 빠름, 생성 2x 빠름. CPU 부담이 절반 이하.
-2. **품질**: 번역 자체의 품질은 Gemma와 동급(성공 케이스 기준). 단, 스탑 불안정성이 치명적 — 6개 중 3개에서 퇴화.
-3. **통합 비용**: drop-in 불가. 카탈로그에 넣으려면 (a) 모델별 채팅 템플릿 적용 지원, (b) 스탑 토큰/마커 후처리(출력을 `<|hy_` 마커에서 잘라내기), (c) 퇴화 입력 재시도 로직이 필요.
-4. **권고**: Gemma 4 E2B 기본 유지는 변함없음. Hy-MT2는 "번역 전용 모델" 슬롯을 만들 때만 후보 — 그전까지 S14의 Tier 1 지위는 유지하되 **통합 전제사항(템플릿+후처리) 명시** 필요.
+같은 샘플·프롬프트(README 형식)로 Q8_0 재실행:
+
+| 항목 | Q4_K_M | Q8_0 |
+|------|--------|------|
+| 파일 크기 | 1.05 GiB (1,133,080,448 B) | **1.78 GiB (1,908,528,192 B)** |
+| 로드 시간 | 1.0s | 1.7s |
+| 생성 속도 (스테디) | ~21 tok/s | ~13.5 tok/s |
+| 스탑 신뢰성 | 3/6 클린, 3/6 런어웨이 | **6/6 정상 종료** |
+| 품질 | 성공 케이스 동급 | 동급 이상 (consistency ↑) |
+
+Q8 번역본:
+| # | 원문 (KR) | Q8 번역 (EN) |
+|---|-----------|--------------|
+| 1 | 이메일은 확인했습니다. 내일까지 답장해 주세요. | Please confirm the email. Please reply by tomorrow. *(톤이 살짝 다름)* |
+| 2 | 나중에 또 연락할게~ | I'll contact you again later~ ✓ |
+| 3 | 예산이 초과될 것 같아서, 이번 분기 지출을 다시 검토하고 있습니다. | I think the budget will be exceeded, so I'm re-evaluating the expenses for this quarter. ✓ |
+| 4 | 다음 주에 계약 갱신 건으로 미팅을 요청드리고 싶습니다… | I would like to request a meeting next week regarding the contract renewal. Please let me know the possible dates, and I will be grateful. ✓ |
+| 5 | 답장 늦어서 죄송해요, 이번 주에 일이 너무 많았어요. | I'm sorry for the delay in my reply. I've been extremely busy this week. ✓ |
+| 6 | API가 페이로드가 1MB를 초과하면 500 에러를 반환해서… | The API returns an error 500 when the payload exceeds 1MB. Therefore, it's necessary to implement chunked uploading. ✓ |
+
+**Q8의 발견:**
+1. **스탑 불안정 해소** — Q4에서 런어웨이했던 3개 케이스(구어체~, formal, tech)가 전부 정상 종료. 퀀트 품질이 스탑 토큰 출력을 안정화했음.
+2. **마커 에코 아티팩트** — 출력에 `<|hy_User|>`, `<|hy_Assistant|>` 마커와 선두 `>`가 섞임 (formal 케이스는 프롬프트 문장까지 에코). 단, 이게 오히려 후처리를 단순화함: 마커 위치가 항상 존재하므로 잘라내기 기준이 확실해짐.
+3. **비용** — 크기 +70%, 속도 -35%. Q8이 "안정성"을 살리지만 CPU 부하가 Q4 대비 크게 늘음.
+
+## 5. 결론
+
+1. **용량·속도**: Hy-MT2는 Gemma 대비 압도적으로 유리 — 파일 43%(Q4)/73%(Q8), 생성 2x 빠름(Q4).
+2. **품질**: Q4는 스탑 불안정(3/6 퇴화)으로 실사용 불가, **Q8은 6/6 안정** + 품질 동급 이상. Q8이 실질 후보.
+3. **통합 비용**: drop-in 불가. (a) 모델별 채팅 템플릿 적용 지원, (b) 마커 스트립 후처리(Q8은 마커가 항상 나오므로 단순), (c) 토큰 캡 안전장치 필요.
+4. **권고**: Gemma 4 E2B 기본 유지. Hy-MT2는 **Q8_0 기준**으로 "번역 전용 모델" 슬롯 후보 — Q4_K_M은 스탑 불안정 때문에 카탈로그 제외.
 
 ## 부록
 - 벤치마크 하네스: `~/.hermes/cache/scratch/modelbench` (Forge.Core 참조 콘솔 앱, scratch — 레포 밖)
-- 원본 리포트: `C:\Users\uitaek\AppData\Local\Temp\bench-forge.txt` (Gemma), `bench-hymt2readme.txt` (Hy-MT2 최적 조건)
+- 원본 리포트: `C:\Users\uitaek\AppData\Local\Temp\bench-forge.txt` (Gemma), `bench-hymt2readme.txt` (Hy-MT2 Q8 최적 조건)
 - 측정 일시: 2026-11-05
