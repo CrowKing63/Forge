@@ -65,6 +65,11 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
+        // Tray-only app: no main window. WPF's default ShutdownMode (OnLastWindowClose)
+        // ends the process when the last open window closes — e.g. closing Settings
+        // quits Forge. Only the tray Exit menu and the crash handler should end it.
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
+
         // S12: global exception handling — a fatal .NET exception ends the app (plan §7)
         // with an opt-in crash dump (no text content) and user guidance.
         DispatcherUnhandledException += OnDispatcherException;
