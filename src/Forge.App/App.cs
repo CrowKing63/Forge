@@ -351,6 +351,10 @@ public partial class App : Application
         DebugLog.Write($"direct '{task}' started");
         SetState(ModelState.Loading, $"Forge: working on {task}…");
 
+        // Working indicator over the selection (click-through, non-activating). Skipped
+        // when the source element's screen rectangle can't be resolved.
+        var overlay = ShowHammerOverlay();
+
         // S8 on-demand reload: the model may have been idle-unloaded since the last task.
         if (!engine.IsLoaded)
         {
@@ -410,6 +414,7 @@ public partial class App : Application
             if (result.IsEmpty)
             {
                 DebugLog.Write($"direct '{task}' finished: no usable output");
+                overlay?.Close();
                 MessageBox.Show("No usable output — the original text is untouched.",
                     "Forge", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
@@ -442,25 +447,81 @@ public partial class App : Application
             DebugLog.Write($"direct '{task}' finished: {replaceResult.Outcome} — {replaceResult.Message} ({replaceResult.Diagnostics})");
 
             if (replaceResult.Outcome == ReplaceAction.Outcome.Replaced)
+            {
+                overlay?.Complete(); // final strike, synced with the clang
                 PlayClang(); // the forge's hammer strike
+            }
             else
+            {
+                overlay?.Close();
                 MessageBox.Show(replaceResult.Message, "Forge", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
         }
         catch (TextCaptureException ex)
         {
             DebugLog.Write($"direct '{task}' capture failed: {ex.Message}");
+            overlay?.Close();
             MessageBox.Show(ex.Message, "Forge", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         catch (Exception ex)
         {
             DebugLog.Write($"direct '{task}' failed: {ex}");
+            overlay?.Close();
             MessageBox.Show($"Failed: {ex.Message} — the original text is untouched.",
                 "Forge", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
+            if (overlay is not null && !overlay.IsFinishing)
+                overlay.Close(); // safety net for any path that didn't finish the strike
             SetState(ModelState.Ready, "Forge: ready");
             _guard.End();
+        }
+    }
+
+    /// <summary>
+    /// Shows the hammer working indicator over the source element's screen rectangle.
+    /// The window is click-through and non-activating, so the source app keeps focus for
+    /// the replace step. Falls back to the screen center when the rectangle can't be
+    /// resolved; returns null only if showing the window itself fails.
+    /// </summary>
+    private HammerOverlayWindow? ShowHammerOverlay()
+    {
+        Rect? rect = null;
+        try
+        {
+            if (_sourceElement is not null)
+            {
+                DebugLog.Write("hammer overlay: reading bounding rectangle");
+                rect = _sourceElement.Current.BoundingRectangle;
+                DebugLog.Write($"hammer overlay: bounding rectangle {rect}");
+            }
+        }
+        catch (Exception ex)
+        {
+            DebugLog.Write($"hammer overlay: bounding rectangle unavailable — {ex.Message}");
+        }
+        if (rect is null || rect.Value.Width <= 0 || rect.Value.Height <= 0)
+        {
+            // No usable selection rectangle — fall back to the screen center so the
+            // feedback still shows even when UIA can't resolve the element's geometry.
+            rect = HammerOverlayWindow.ScreenCenter();
+            DebugLog.Write("hammer overlay: no usable bounding rectangle — using screen center");
+        }
+
+        // The indicator is a nicety: any failure here must never break the translation.
+        try
+        {
+            var overlay = new HammerOverlayWindow(rect.Value);
+            DebugLog.Write("hammer overlay: constructed, showing");
+            overlay.Show(); // ShowActivated=false: no focus change
+            DebugLog.Write($"hammer overlay shown over {rect.Value}");
+            return overlay;
+        }
+        catch (Exception ex)
+        {
+            DebugLog.Write($"hammer overlay: failed to show — {ex}");
+            return null;
         }
     }
 
