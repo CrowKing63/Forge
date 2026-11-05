@@ -93,7 +93,26 @@ Q8 번역본:
 2. **마커 에코 아티팩트** — 출력에 `<|hy_User|>`, `<|hy_Assistant|>` 마커와 선두 `>`가 섞임 (formal 케이스는 프롬프트 문장까지 에코). 단, 이게 오히려 후처리를 단순화함: 마커 위치가 항상 존재하므로 잘라내기 기준이 확실해짐.
 3. **비용** — 크기 +70%, 속도 -35%. Q8이 "안정성"을 살리지만 CPU 부하가 Q4 대비 크게 늘음.
 
-## 5. 결론
+## 5. 공식 통합 (2026-11-05)
+
+Q8_0을 `%LOCALAPPDATA%\Forge\Models\`에 배치하고, 앱이 Hy-MT2를 제대로 쓸 수 있도록 Forge.Core에 모델 패밀리 지원 추가:
+
+| 변경 | 내용 |
+|------|------|
+| `ModelProfile` (새 파일) | 파일명에서 패밀리 감지(`Hy-MT2` → HyMt2, 그 외 Gemma4) + Hy-MT2 출력 토큰 캡(512, 런어웨이 방지) |
+| `PromptBuilder.Build(task, text, family)` (오버로드) | Hy-MT2는 README 검증 형식 `<\|hy_begin_of_sentence\|><\|hy_User\|>{지시}{입력}<\|hy_Assistant\|>` — 번역은 README 원문 지시, 그 외 태스크는 기존 SystemPrompts |
+| `OutputPostProcessor.Clean(raw, family)` (새 파일) | `<\|hy_User\|>`~`<\|hy_Assistant\|>` 사이 추출(마커 에코 스트립), 마커 쌍 없으면 전 토큰 제거 |
+| 호출 지점 4개 | App.cs(RunTaskAsync, direct flow) + Cli(interactive, eval) — family 감지 → 프롬프트 → 후처리 연결 |
+
+**E2E 검증 (Forge.Cli eval, Q8_0):**
+- **translate-01/02/03: 3/3 PASS** — 마커 없이 클린 출력, 품질 양호
+- proofread/rewrite/summarize: FAIL (language mismatch) — **예상된 동작**: Hy-MT2는 번역 전용이라 비번역 태스크에서 한국어 입력을 영어로 번역해버림
+
+**한계 (문서화됨):**
+- Hy-MT2 로드 시 교정·재작성·요약 태스크는 쓸 수 없음. 태스크 게이팅(UI 경고/차단)은 미구현 — 사용자 판단으로 보류.
+- Gemma 4 E2B 기본 모델 유지(ForgeSettings.ModelPath 디폴트 변경 없음). Hy-MT2는 Settings → Model 파일 경로로 옵트인.
+
+## 6. 결론
 
 1. **용량·속도**: Hy-MT2는 Gemma 대비 압도적으로 유리 — 파일 43%(Q4)/73%(Q8), 생성 2x 빠름(Q4).
 2. **품질**: Q4는 스탑 불안정(3/6 퇴화)으로 실사용 불가, **Q8은 6/6 안정** + 품질 동급 이상. Q8이 실질 후보.
