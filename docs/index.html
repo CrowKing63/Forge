@@ -105,7 +105,7 @@
     66%      { opacity: 1; transform: scale(1); }
     100%     { opacity: 0; transform: scale(1.5); }
   }
-  /* ambient translation chips in the margins: a word pops into English, then drifts away */
+  /* ambient translation chips in the margins: a foreign word dissolves into English */
   .chips {
     position: fixed;
     inset: 0;
@@ -113,34 +113,50 @@
   }
   .chip {
     position: absolute;
-    font-size: 0.8125rem;
+    font-size: clamp(1.1rem, 1.9vw, 1.45rem);
     letter-spacing: 0.01em;
     white-space: nowrap;
+    animation: chip-drift 18s ease-in-out var(--d) infinite;
+  }
+  @keyframes chip-drift {
+    0%, 100% { transform: translateY(0); }
+    50%      { transform: translateY(-16px); }
   }
   .chip b, .chip i {
     position: absolute;
     left: 0;
     top: 0;
-    font-weight: 500;
+    font-weight: 600;
     font-style: normal;
-    color: var(--muted);
+    padding: 0.4em 0.85em;
+    border-radius: 999px;
+    background: rgba(233, 229, 222, 0.07);
+    border: 1px solid rgba(233, 229, 222, 0.16);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     opacity: 0;
   }
-  .chip b { animation: chip-src 18s linear var(--d) infinite; }
-  .chip i { animation: chip-pop 18s ease var(--d) infinite; }
+  .chip b { color: #C6C0B6; animation: chip-src 18s linear var(--d) infinite; }
+  .chip i {
+    color: var(--text);
+    border-color: rgba(237, 122, 69, 0.45);
+    text-shadow: 0 0 22px rgba(237, 122, 69, 0.85);
+    animation: chip-pop 18s linear var(--d) infinite;
+  }
   @keyframes chip-src {
-    0%   { opacity: 0; }
-    6%   { opacity: 0.8; }
-    40%  { opacity: 0.8; }
-    50%  { opacity: 0; }
-    100% { opacity: 0; }
+    0%        { opacity: 0; transform: translateY(8px) scale(0.94); filter: blur(0); }
+    6%        { opacity: 1; transform: translateY(0) scale(1); }
+    36%       { opacity: 1; transform: translateY(0) scale(1); }
+    44%       { opacity: 0; transform: translateY(-6px) scale(0.92); filter: blur(6px); }
+    100%      { opacity: 0; }
   }
   @keyframes chip-pop {
-    0%, 42%   { opacity: 0; transform: scale(0.82); }
-    52%       { opacity: 1; transform: scale(1.05); }
-    58%       { transform: scale(1); }
-    84%       { opacity: 1; }
-    94%, 100% { opacity: 0; transform: scale(0.95); }
+    0%, 38%   { opacity: 0; transform: scale(0.7); filter: blur(4px); }
+    50%       { opacity: 1; transform: scale(1.08); filter: blur(0); }
+    56%       { transform: scale(1); }
+    82%       { opacity: 1; transform: scale(1); }
+    94%, 100% { opacity: 0; transform: translateY(-10px) scale(0.94); filter: blur(3px); }
   }
   @media (max-width: 1000px), (max-height: 640px) {
     .chips { display: none; }
@@ -148,7 +164,8 @@
   @media (prefers-reduced-motion: reduce) {
     .hammer, .spark { animation: none; }
     .spark { opacity: 0; }
-    .chip b, .chip i { animation: none; opacity: 0; }
+    .chip, .chip b, .chip i { animation: none; }
+    .chip b, .chip i { opacity: 0; }
   }
 </style>
 </head>
