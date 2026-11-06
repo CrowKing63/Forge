@@ -21,10 +21,12 @@
 
   <ItemGroup>
     <!-- Copied next to the exe; loaded from disk (pack-URI resource lookup is
-         case-sensitive and flaky on Windows). -->
-    <Content Include="Assets\*.ico" CopyToOutputDirectory="PreserveNewest" />
+         case-sensitive and flaky on Windows). Excluded from the single-file bundle so
+         they stay on disk in AppContext.BaseDirectory — LoadIcon reads them from there,
+         which in single-file mode is the exe's folder, not the %TEMP% extraction dir. -->
+    <Content Include="Assets\*.ico" CopyToOutputDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <!-- The "clang" strike, played on a successful replace (the forge's hammer hitting the anvil). -->
-    <Content Include="Assets\clang.wav" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\clang.wav" CopyToOutputDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
   </ItemGroup>
 
 </Project>

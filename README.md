@@ -10,6 +10,8 @@ A local translator into English for Windows. Select text in any app, press **Ctr
 
 ## Installation
 
+Releases are built automatically when a version tag (`v*`) is pushed — each release ships an installer and a portable zip.
+
 ### Installer (per-user, no admin required)
 
 1. Download `ForgeSetup-<version>.exe` from the [Releases](https://github.com/CrowKing63/Forge/releases) page.
@@ -18,7 +20,7 @@ A local translator into English for Windows. Select text in any app, press **Ctr
 
 ### Portable
 
-Download the portable zip, extract it anywhere, and run `Forge.App.exe`. Add an empty `portable.txt` file next to the exe and Forge keeps its settings and models in that folder instead of `%LOCALAPPDATA%\Forge` — copy the folder to a USB drive and go.
+Download `Forge-Portable-<version>-win-x64.zip`, extract it anywhere, and run `Forge.App.exe`. The zip contains just the exe and a `portable.txt` marker — with the marker present, Forge keeps its settings (`settings.json`) and models (`Models\`) in that folder instead of `%LOCALAPPDATA%\Forge`. Copy the folder to a USB drive and go.
 
 ## First run: model download
 
@@ -59,6 +61,7 @@ The default model (Gemma 4 E2B QAT GGUF) is downloaded from Hugging Face under G
 
 - Build each project separately (`src/Forge.App`, `src/Forge.Core`, `src/Forge.Cli`, `tests/Forge.Core.Tests`) — there is no solution file
 - Installer: `installer/forge.isn` (Inno Setup 6); the header comments in that file describe the build order
+- Portable: `portable.bat` publishes the single-file build to `dist/portable` with the `portable.txt` marker
 
 ## License
 

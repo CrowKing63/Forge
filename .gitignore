@@ -13,6 +13,7 @@ obj/
 # Installer build output
 installer/publish/
 installer/Output/
+dist/
 
 # Personal launcher (maintainer-only)
 use.bat

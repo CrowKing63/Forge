@@ -3,9 +3,12 @@
 ; User data (settings, models) lives in %LOCALAPPDATA%\Forge and is NOT touched by uninstall.
 ;
 ; Build order:
-;   dotnet publish src/Forge.App/Forge.App.csproj -c Release -r win-x64 --self-contained -o installer/publish
-;   "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\forge.isn
+;   dotnet publish src/Forge.App/Forge.App.csproj -c Release -r win-x64 --self-contained
+;     -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=none
+;     -o installer/publish
+;   "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=<version> installer\forge.isn
 ;   (or the per-user ISCC at %LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe)
+; The release CI (.github/workflows/release.yml) runs these same steps on tag push.
 
 #define MyAppName "Forge"
 #define MyAppVersion "0.1.0"

@@ -14,9 +14,11 @@ public static class HotkeyConfig
     /// <summary>The default translate hotkey.</summary>
     public const string DefaultTranslateBinding = "Ctrl+E";
 
-    /// <summary>%LOCALAPPDATA%\Forge\hotkeys.json</summary>
-    public static string ConfigPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Forge", "hotkeys.json");
+    /// <summary>
+    /// hotkeys.json in the data directory (<see cref="Forge.Core.AppPaths.DataDir"/>): under
+    /// %LOCALAPPDATA%\Forge normally, or next to the exe in portable mode.
+    /// </summary>
+    public static string ConfigPath => Path.Combine(Forge.Core.AppPaths.DataDir, "hotkeys.json");
 
     /// <summary>
     /// Loads the translate binding. Reads the "translate" key, falling back to the

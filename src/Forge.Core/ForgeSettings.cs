@@ -72,9 +72,11 @@ public sealed class ForgeSettings
     /// </summary>
     public bool AutoStart { get; set; } = false;
 
-    /// <summary>%LOCALAPPDATA%\Forge\settings.json</summary>
-    public static string DefaultConfigPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Forge", "settings.json");
+    /// <summary>
+    /// settings.json in the data directory (<see cref="AppPaths.DataDir"/>): under
+    /// %LOCALAPPDATA%\Forge normally, or next to the exe in portable mode.
+    /// </summary>
+    public static string DefaultConfigPath => Path.Combine(AppPaths.DataDir, "settings.json");
 
     /// <summary>
     /// Loads settings from <paramref name="path"/> (default: <see cref="DefaultConfigPath"/>).

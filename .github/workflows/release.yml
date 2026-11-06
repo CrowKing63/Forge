@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    name: Installer + portable
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Publish (self-contained, single file)
+        shell: pwsh
+        run: |
+          dotnet publish src/Forge.App/Forge.App.csproj `
+            -c Release -r win-x64 --self-contained `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:DebugType=none `
+            -o installer/publish
+
+      - name: Build installer (Inno Setup 6)
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            winget install --id JRSoftware.InnoSetup --accept-source-agreements --accept-package-agreements
+            $iscc = "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+          }
+          & $iscc "/DMyAppVersion=$version" "installer\forge.isn"
+
+      - name: Build portable zip (exe + portable.txt)
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          New-Item -ItemType File -Path installer\publish\portable.txt -Force | Out-Null
+          New-Item -ItemType Directory -Path dist | Out-Null
+          # The exe is fully self-contained (managed + native libs + assets bundled),
+          # so the zip carries only the exe and the portable marker.
+          Compress-Archive -Path installer\publish\Forge.App.exe, installer\publish\portable.txt `
+            -DestinationPath "dist\Forge-Portable-$version-win-x64.zip"
+
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $version = $tag -replace '^v', ''
+          $installer = (Get-ChildItem installer\Output\ForgeSetup-*.exe)[0].FullName
+          gh release create "$tag" `
+            --title "Forge $version" `
+            --notes "## Artifacts`n`n- **ForgeSetup-$version.exe** — per-user installer (no admin required)`n- **Forge-Portable-$version-win-x64.zip** — portable: one self-contained exe + ``portable.txt``; settings and models live next to the exe" `
+            "$installer" "dist\Forge-Portable-$version-win-x64.zip"

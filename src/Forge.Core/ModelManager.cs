@@ -72,9 +72,11 @@ public sealed class ModelManager
         "e531007218dfab990486a5de7676a6932d6ea8dea233d1f698d7c21cf8a16889",
         "https://huggingface.co/unsloth/gemma-4-E2B-it-qat-GGUF/resolve/main/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf");
 
-    /// <summary>%LOCALAPPDATA%\Forge\Models — the default models directory.</summary>
-    public static string DefaultModelsDir => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Forge", "Models");
+    /// <summary>
+    /// Models in the data directory (<see cref="AppPaths.DataDir"/>): under
+    /// %LOCALAPPDATA%\Forge normally, or next to the exe in portable mode.
+    /// </summary>
+    public static string DefaultModelsDir => Path.Combine(AppPaths.DataDir, "Models");
 
     private static readonly int ReadBufferSize = 64 * 1024;
 

@@ -47,6 +47,14 @@ public partial class App : Application, IOnboardingHost
     [STAThread]
     public static void Main()
     {
+        // Single-instance guard: a second launch would fight the first over the global hotkey
+        // and add a duplicate tray icon — exit silently instead (the running instance owns
+        // the tray). The mutex lives for the process's lifetime (the using scope ends when Run returns).
+        bool createdNew;
+        using var instance = new Mutex(false, @"Local\Forge.App.SingleInstance", out createdNew);
+        if (!createdNew)
+            return;
+
         var app = new App();
         app.Run();
     }

@@ -10,9 +10,11 @@ namespace Forge.Core;
 /// </summary>
 public static class CrashDump
 {
-    /// <summary>%LOCALAPPDATA%\Forge\CrashDumps</summary>
-    public static string DumpDirectory => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Forge", "CrashDumps");
+    /// <summary>
+    /// CrashDumps in the data directory (<see cref="AppPaths.DataDir"/>): under
+    /// %LOCALAPPDATA%\Forge normally, or next to the exe in portable mode.
+    /// </summary>
+    public static string DumpDirectory => Path.Combine(AppPaths.DataDir, "CrashDumps");
 
     /// <summary>
     /// Writes a crash dump and returns the file path, or null when it could not be
