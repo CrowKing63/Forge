@@ -20,7 +20,7 @@ namespace Forge.App;
 public sealed class HammerOverlayWindow : Window
 {
     private const double CardWidth = 84;
-    private const double CardHeight = 72;
+    private const double CardHeight = 80;
     private const double ShadowPad = 20; // window padding so the card's drop shadow is not clipped
     private const double WindowWidth = CardWidth + 2 * ShadowPad;
     private const double WindowHeight = CardHeight + 2 * ShadowPad;
@@ -68,14 +68,22 @@ public sealed class HammerOverlayWindow : Window
         Height = WindowHeight;
 
         var canvas = new Canvas();
+        // Glass card: a dark fill at ~75% opacity so the page behind shows through faintly,
+        // with a top-down rim-light border — the Win11 acrylic look faked in WPF (real DWM
+        // Mica/Acrylic cannot apply to a per-pixel-transparent window).
+        var glassFill = new LinearGradientBrush(Color.FromRgb(0x26, 0x26, 0x2D), Color.FromRgb(0x1C, 0x1C, 0x22), 90);
+        glassFill.Opacity = 0.75;
+        glassFill.Freeze();
+        var rimLight = new LinearGradientBrush(Color.FromArgb(0x2A, 0xFF, 0xFF, 0xFF), Colors.Transparent, 90);
+        rimLight.Freeze();
         _card = new Border
         {
             Width = CardWidth,
             Height = CardHeight,
             CornerRadius = new CornerRadius(10),
-            Background = new SolidColorBrush(Color.FromRgb(0x1E, 0x1E, 0x24)),
+            Background = glassFill,
             BorderThickness = new Thickness(1),
-            BorderBrush = new SolidColorBrush(Color.FromRgb(0x3A, 0x3A, 0x44)),
+            BorderBrush = rimLight,
             Child = canvas,
         };
         _card.Effect = new DropShadowEffect
@@ -227,7 +235,7 @@ public sealed class HammerOverlayWindow : Window
         var scale = 1 + 0.05 * impact;
         if (t < EntranceMs)
             scale *= 0.6 + 0.4 * EaseOutBack(t / EntranceMs);
-        _card.RenderTransform = new ScaleTransform(scale, scale) { CenterX = 42, CenterY = 36 };
+        _card.RenderTransform = new ScaleTransform(scale, scale) { CenterX = 42, CenterY = 40 };
 
         _elapsed.Text = $"{t / 1000.0:0.0}s";
     }
@@ -243,7 +251,7 @@ public sealed class HammerOverlayWindow : Window
         _finishing = true;
         _timer.Stop();
         _sparks.Opacity = 1;
-        _card.RenderTransform = new ScaleTransform(1.05, 1.05) { CenterX = 42, CenterY = 36 };
+        _card.RenderTransform = new ScaleTransform(1.05, 1.05) { CenterX = 42, CenterY = 40 };
         var hide = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(450) };
         hide.Tick += (_, _) => Close();
         hide.Start();
