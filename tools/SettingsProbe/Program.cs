@@ -65,6 +65,16 @@ internal static class Program
             }
         }
 
+        static IEnumerable<System.Windows.Shapes.Path> AllPaths(DependencyObject root)
+        {
+            for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+            {
+                var child = VisualTreeHelper.GetChild(root, i);
+                if (child is System.Windows.Shapes.Path p) yield return p;
+                foreach (var nested in AllPaths(child)) yield return nested;
+            }
+        }
+
         // Awaits on the dispatcher thread pump WPF frames, so layout/render run between steps.
         app.Dispatcher.InvokeAsync(async () =>
         {
@@ -150,6 +160,12 @@ internal static class Program
                 if (!ReferenceEquals(selectedRow.BorderBrush, ForgeTheme.AccentBrush))
                     throw new Exception("the selected card should carry the accent border");
                 Log("selected card highlight OK");
+
+                // --- Model title folder icon: a clickable folder glyph next to the "Model" label ---
+                var icon = AllPaths(settings).FirstOrDefault(p =>
+                    (VisualTreeHelper.GetParent(p) as Border)?.ToolTip as string == "Open the models folder");
+                if (icon is null) throw new Exception("folder icon button not found in the Model section title");
+                Log("model folder icon OK");
 
                 // --- Download card construction (S18): build one for the catalog default and
                 // assert its shape (Download + Cancel buttons, name text) without touching disk.

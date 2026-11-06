@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -7,6 +8,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
+using Shapes = System.Windows.Shapes;
 using Forge.Core;
 
 namespace Forge.App;
@@ -208,7 +210,20 @@ public sealed class SettingsWindow : Window
         // S18: models are clickable cards, not a dropdown. Every GGUF in the models
         // directory is detected and listed; clicking one selects it (auto-save + hot-swap).
         // No manual path entry — dropping a file into the folder makes it appear here.
-        panel.Children.Add(MakeLabel("Model"));
+        var title = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Margin = new Thickness(0, 2, 0, 4),
+        };
+        title.Children.Add(new TextBlock
+        {
+            Text = "Model",
+            FontWeight = FontWeights.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        // A folder icon next to the title opens the models folder in Explorer.
+        title.Children.Add(MakeFolderIconButton());
+        panel.Children.Add(title);
         _modelList = new StackPanel();
         panel.Children.Add(_modelList);
         panel.Children.Add(MakeHint("Drop .gguf files into the models folder to add them; click one to select it."));
@@ -374,6 +389,55 @@ public sealed class SettingsWindow : Window
         row.MouseLeftButtonUp += (_, _) => SelectModel(path);
         _modelRows.Add((row, path));
         return row;
+    }
+
+    /// <summary>A small folder icon next to the Model title: opens the models folder in Explorer.</summary>
+    private static Border MakeFolderIconButton()
+    {
+        var glyph = new Shapes.Path
+        {
+            Data = Geometry.Parse("M2 4.5 L6.5 4.5 L8.5 6.5 L14 6.5 L14 12.5 L2 12.5 Z"),
+            Stroke = ForgeTheme.MutedBrush,
+            StrokeThickness = 1.5,
+            SnapsToDevicePixels = true,
+        };
+        var button = new Border
+        {
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(4),
+            Margin = new Thickness(8, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Background = Brushes.Transparent,
+            Child = glyph,
+            ToolTip = "Open the models folder",
+        };
+        button.MouseEnter += (_, _) =>
+        {
+            if (button.Background == Brushes.Transparent) button.Background = ForgeTheme.HoverFieldBrush;
+            glyph.Stroke = ForgeTheme.TextBrush;
+        };
+        button.MouseLeave += (_, _) =>
+        {
+            button.Background = Brushes.Transparent;
+            glyph.Stroke = ForgeTheme.MutedBrush;
+        };
+        button.MouseLeftButtonUp += (_, _) => OpenModelsFolder();
+        return button;
+    }
+
+    /// <summary>Opens the models folder in Explorer (creating it if it does not exist yet).</summary>
+    private static void OpenModelsFolder()
+    {
+        try
+        {
+            var dir = ModelManager.DefaultModelsDir;
+            Directory.CreateDirectory(dir);
+            Process.Start(new ProcessStartInfo(dir) { UseShellExecute = true });
+        }
+        catch (Exception)
+        {
+            // Best-effort: a failed Explorer launch must not crash the settings window.
+        }
     }
 
     /// <summary>A download card: name + size with a Download button and progress bar.</summary>
