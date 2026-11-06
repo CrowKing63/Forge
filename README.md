@@ -47,8 +47,6 @@ Tray icon → **Settings**: model cards (with an in-app download section for cat
 
 In-place replacement works on Win32 edit controls (Notepad, Word) and Chromium text fields (Edge, Chrome). For other apps Forge falls back to the clipboard with a paste prompt.
 
-Note: on Windows 11 Notepad, turn off "Autocorrect typos" and "Check spelling as you type" if you ever use the clipboard fallback — Notepad's spellcheck can interrupt injected keystrokes.
-
 ## Privacy
 
 Everything runs locally. The only network access is the model download you explicitly start; there is no telemetry and no other traffic.
@@ -59,7 +57,6 @@ The default model (Gemma 4 E2B QAT GGUF) is downloaded from Hugging Face under G
 
 ## Development
 
-- `use.bat` — run the real flow from source (tray + Ctrl+E; debug log in `%TEMP%\forge-use.log`)
 - Build each project separately (`src/Forge.App`, `src/Forge.Core`, `src/Forge.Cli`, `tests/Forge.Core.Tests`) — there is no solution file
 - Installer: `installer/forge.isn` (Inno Setup 6); the header comments in that file describe the build order
 
