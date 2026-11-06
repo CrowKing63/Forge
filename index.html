@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Forge — local translation for Windows</title>
+<meta name="description" content="Select text in any app, press Ctrl+E, and it's translated in place by a local model. No cloud, no telemetry.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cpath fill='%23ED7A45' d='M3 9H37C40 9 42 11 42 14V17C42 21 39 23 35 24V28H41C44 28 46 30 46 33V37H2V33C2 30 4 28 7 28H13V24C8 23 5 20 4 16Z'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #121110;
+    --text: #E9E5DE;
+    --muted: #A8A29A;
+    --ember: #ED7A45;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", system-ui, Roboto, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6vh 1.5rem;
+  }
+  main {
+    max-width: 30rem;
+    text-align: center;
+  }
+  .mark {
+    width: clamp(56px, 10vw, 72px);
+    margin: 0 auto 2rem;
+  }
+  .mark svg { display: block; width: 100%; height: auto; }
+  h1 {
+    font-size: clamp(2.6rem, 7vw, 3.6rem);
+    font-weight: 650;
+    letter-spacing: -0.03em;
+    line-height: 1;
+    margin-bottom: 1.1rem;
+  }
+  .lede {
+    font-size: clamp(1rem, 2.4vw, 1.125rem);
+    line-height: 1.6;
+    color: var(--text);
+    margin-bottom: 2.2rem;
+  }
+  kbd {
+    font-family: inherit;
+    font-size: 0.82em;
+    border: 1px solid #57534C;
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    padding: 0.02em 0.38em;
+    color: var(--text);
+  }
+  .cta {
+    display: inline-block;
+    background: var(--ember);
+    color: #16130F;
+    font-weight: 600;
+    text-decoration: none;
+    padding: 0.7em 1.4em;
+    border-radius: 8px;
+  }
+  .cta:hover { background: #F58A5B; }
+  .facts {
+    margin-top: 1.6rem;
+    font-size: 0.875rem;
+    color: var(--muted);
+  }
+  footer {
+    margin-top: 3.5rem;
+    font-size: 0.875rem;
+    color: var(--muted);
+  }
+  footer a, .facts a {
+    color: var(--muted);
+    text-decoration: none;
+  }
+  footer a:hover, .facts a:hover { color: var(--text); text-decoration: underline; }
+  a:focus-visible, button:focus-visible {
+    outline: 2px solid var(--ember);
+    outline-offset: 3px;
+  }
+  /* one orchestrated moment: the hammer strikes once on load */
+  .hammer {
+    transform-origin: 0px 0px;
+    animation: strike 1.1s cubic-bezier(0.3, 0, 0.2, 1) 0.35s both;
+  }
+  @keyframes strike {
+    0%   { transform: rotate(-30deg); }
+    62%  { transform: rotate(0deg); }
+    72%  { transform: rotate(-4deg); }
+    100% { transform: rotate(0deg); }
+  }
+  .spark {
+    opacity: 0;
+    transform-origin: center;
+    animation: spark 1.1s ease-out 0.35s both;
+  }
+  @keyframes spark {
+    0%, 58%  { opacity: 0; transform: scale(0.2); }
+    66%      { opacity: 1; transform: scale(1); }
+    100%     { opacity: 0; transform: scale(1.5); }
+  }
+  /* ambient translation chips in the margins: a word pops into English, then drifts away */
+  .chips {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+  }
+  .chip {
+    position: absolute;
+    font-size: 0.8125rem;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+  }
+  .chip b, .chip i {
+    position: absolute;
+    left: 0;
+    top: 0;
+    font-weight: 500;
+    font-style: normal;
+    color: var(--muted);
+    opacity: 0;
+  }
+  .chip b { animation: chip-src 18s linear var(--d) infinite; }
+  .chip i { animation: chip-pop 18s ease var(--d) infinite; }
+  @keyframes chip-src {
+    0%   { opacity: 0; }
+    6%   { opacity: 0.8; }
+    40%  { opacity: 0.8; }
+    50%  { opacity: 0; }
+    100% { opacity: 0; }
+  }
+  @keyframes chip-pop {
+    0%, 42%   { opacity: 0; transform: scale(0.82); }
+    52%       { opacity: 1; transform: scale(1.05); }
+    58%       { transform: scale(1); }
+    84%       { opacity: 1; }
+    94%, 100% { opacity: 0; transform: scale(0.95); }
+  }
+  @media (max-width: 1000px), (max-height: 640px) {
+    .chips { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hammer, .spark { animation: none; }
+    .spark { opacity: 0; }
+    .chip b, .chip i { animation: none; opacity: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="chips" aria-hidden="true">
+  <span class="chip" style="left:7vw; top:22vh; --d:0s"><b>bonjour</b><i>hello</i></span>
+  <span class="chip" style="right:9vw; top:30vh; --d:4.5s"><b>hola</b><i>hello</i></span>
+  <span class="chip" style="left:8vw; bottom:26vh; --d:9s"><b>danke</b><i>thank you</i></span>
+  <span class="chip" style="right:10vw; bottom:20vh; --d:13.5s"><b>감사합니다</b><i>thank you</i></span>
+  <span class="chip" style="left:15vw; top:74vh; --d:6.75s"><b>ありがとう</b><i>thank you</i></span>
+</div>
+<main style="position:relative; z-index:1">
+  <div class="mark" aria-hidden="true">
+    <svg viewBox="0 0 64 52" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <!-- anvil: long pointed horn, narrow waist, wide base -->
+      <path fill="#E9E5DE" d="M2 14 L10 9 H44 C47 9 48 11 48 13 V16 C48 20 45 22 41 23 V27 H47 C50 27 52 29 52 32 V38 H2 V32 C2 29 4 27 7 27 H13 V23 C9 22 5 19 2 14 Z"/>
+      <!-- spark at the strike point -->
+      <circle class="spark" cx="40" cy="11" r="5" fill="#ED7A45"/>
+      <!-- hammer: distinct head + angled handle, pivot at head base -->
+      <g transform="translate(46 3) rotate(-38)">
+        <g class="hammer">
+          <rect x="-9" y="-10" width="18" height="10" rx="2.5" fill="#ED7A45"/>
+          <rect x="-2.5" y="0" width="5" height="20" rx="2" fill="#ED7A45"/>
+        </g>
+      </g>
+    </svg>
+  </div>
+
+  <h1>Forge</h1>
+  <p class="lede">Select text in any app, press <kbd>Ctrl</kbd>+<kbd>E</kbd>, and it&rsquo;s translated in place &mdash; by a model running on your machine.</p>
+
+  <a class="cta" href="https://github.com/CrowKing63/Forge/releases">Download for Windows</a>
+  <p class="facts">Windows 10/11 x64, self-contained. No cloud, no telemetry.</p>
+
+  <footer>MIT &mdash; <a href="https://github.com/CrowKing63/Forge">github.com/CrowKing63/Forge</a></footer>
+</main>
+</body>
+</html>

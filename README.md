@@ -1,6 +1,6 @@
 # Forge
 
-A local Korean → English translator for Windows. Select text in any app, press **Ctrl+E**, and Forge translates it with a local AI model and replaces the selection in place — no cloud, no account, no telemetry.
+A local translator into English for Windows. Select text in any app, press **Ctrl+E**, and Forge translates it with a local AI model and replaces the selection in place — no cloud, no account, no telemetry. Built for anyone working in a language that isn't English.
 
 ## How it works
 
