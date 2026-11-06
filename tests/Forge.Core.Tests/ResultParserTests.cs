@@ -53,4 +53,33 @@ public class ResultParserTests
         var result = ResultParser.Parse("The weather is nice today.");
         Assert.False(result.LanguageMismatch);
     }
+
+    [Fact]
+    public void Parse_SpanishOutputWithSpanishSource_IsLanguageMismatch()
+    {
+        // A Spanish input that comes back in Spanish did not translate.
+        var result = ResultParser.Parse("Hace buen tiempo hoy.", "Hoy hace buen tiempo.");
+        Assert.True(result.LanguageMismatch);
+    }
+
+    [Fact]
+    public void Parse_EnglishOutputWithSpanishSource_NoMismatch()
+    {
+        var result = ResultParser.Parse("The weather is nice today.", "Hoy hace buen tiempo.");
+        Assert.False(result.LanguageMismatch);
+    }
+
+    [Fact]
+    public void Parse_KoreanSourceEnglishOutput_NoMismatch()
+    {
+        var result = ResultParser.Parse("The weather is nice today.", "오늘 날씨가 좋다.");
+        Assert.False(result.LanguageMismatch);
+    }
+
+    [Fact]
+    public void Parse_DigitOnlyText_NeverMismatches()
+    {
+        var result = ResultParser.Parse("12345", "67890");
+        Assert.False(result.LanguageMismatch);
+    }
 }

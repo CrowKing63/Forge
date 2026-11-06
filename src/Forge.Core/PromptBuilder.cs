@@ -1,16 +1,17 @@
 namespace Forge.Core;
 
 /// <summary>
-/// Builds the prompt for the app's single task: translating a selected Korean
-/// text into English. The instruction per family is kept verbatim — both were
-/// benchmark-verified on real models (S13 tuning for Gemma 4, S15 README
-/// instruction for Hy-MT2) and MT models are sensitive to wording changes.
+/// Builds the prompt for the app's single task: translating a selected text
+/// (any source language) into English. The instruction per family is kept
+/// verbatim — both were benchmark-verified on real models (S13 tuning for
+/// Gemma 4, S15 README instruction for Hy-MT2) and MT models are sensitive
+/// to wording changes.
 /// </summary>
 public static class PromptBuilder
 {
-    /// <summary>Gemma 4 translation instruction (S13-tuned).</summary>
+    /// <summary>Gemma 4 translation instruction (S13-tuned; source language agnostic).</summary>
     private const string GemmaInstruction =
-        "Translate the following Korean text to natural English. Preserve meaning and tone. Output only the translation.";
+        "Translate the following text to natural English. Preserve meaning and tone. Output only the translation.";
 
     /// <summary>Hy-MT2 README instruction, verbatim (S15-verified).</summary>
     private const string HyMt2Instruction =

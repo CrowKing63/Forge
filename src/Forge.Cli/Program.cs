@@ -109,7 +109,7 @@ swInfer.Stop();
 Console.WriteLine();
 
 // ---- result parsing and display (S3) ----
-var result = ResultParser.Parse(OutputPostProcessor.Clean(sb.ToString(), family));
+var result = ResultParser.Parse(OutputPostProcessor.Clean(sb.ToString(), family), selected);
 if (result.IsEmpty)
 {
     Console.Error.WriteLine("[error] The model returned no usable output.");

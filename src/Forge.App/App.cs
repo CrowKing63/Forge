@@ -208,7 +208,7 @@ public partial class App : Application, IOnboardingHost
                 sb.Append(token);
             DebugLog.Write($"direct translate: inference done ({sb.Length} chars)");
 
-            var result = ResultParser.Parse(OutputPostProcessor.Clean(sb.ToString(), family));
+            var result = ResultParser.Parse(OutputPostProcessor.Clean(sb.ToString(), family), selected);
             UnloadAfterInference(); // S17: apply the unload choice (immediate release or idle timer)
 
             if (result.IsEmpty)
