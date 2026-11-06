@@ -1,6 +1,6 @@
 # Forge
 
-A local translator into English for Windows. Select text in any app, press **Ctrl+E**, and Forge translates it with a local AI model and replaces the selection in place — no cloud, no account, no telemetry. Built for anyone working in a language that isn't English.
+A local translator into English for Windows — one hotkey, nothing else. Select text in any app, press **Ctrl+E**, and Forge translates it with a local AI model and replaces the selection in place. There is no API key, no cloud account, no Ollama, no prompt to write, no model to tune: everything runs inside the app, and the only network access is the one-time model download you approve on first run. On supported apps (Notepad, Word, Edge, Chrome) the replacement lands in place without touching your clipboard; elsewhere Forge puts the translation on the clipboard and tells you to press **Ctrl+V**. No account, no telemetry.
 
 ## How it works
 
