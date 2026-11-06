@@ -27,6 +27,7 @@
     <Content Include="Assets\*.ico" CopyToOutputDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <!-- The "clang" strike, played on a successful replace (the forge's hammer hitting the anvil). -->
     <Content Include="Assets\clang.wav" CopyToOutputDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <Content Include="Assets\paper.wav" CopyToOutputDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
   </ItemGroup>
 
 </Project>

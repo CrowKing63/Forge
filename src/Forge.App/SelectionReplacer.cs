@@ -14,8 +14,12 @@ namespace Forge.App;
 /// </summary>
 public static class SelectionReplacer
 {
-    /// <summary>The outcome of a replace attempt plus a user-facing message.</summary>
-    public sealed record ReplaceResult(ReplaceAction.Outcome Outcome, string Message, string Diagnostics = "");
+    /// <summary>
+    /// The outcome of a replace attempt plus a user-facing message.
+    /// <paramref name="ClipboardStaged"/> is true when the result was successfully written
+    /// to the clipboard (the fallback case that only needs a quiet "press Ctrl+V" notice).
+    /// </summary>
+    public sealed record ReplaceOutcome(ReplaceAction.Outcome Outcome, string Message, bool ClipboardStaged = false, string Diagnostics = "");
 
     /// <summary>
     /// Replaces <paramref name="selectedText"/> with <paramref name="replacement"/> in the
@@ -23,25 +27,26 @@ public static class SelectionReplacer
     /// then a UIA splice (works for Chromium even after the visual selection is gone),
     /// then stages the result on the clipboard for a manual paste.
     /// </summary>
-    public static ReplaceResult Replace(IntPtr sourceWindow, AutomationElement? sourceElement, string selectedText, string replacement)
+    public static ReplaceOutcome Replace(IntPtr sourceWindow, AutomationElement? sourceElement, string selectedText, string replacement)
     {
         // 1) EM_REPLACESEL: in-place, focus-preserving.
         bool em = UiaProbe.ReplaceSelectionText(sourceWindow, replacement);
         if (em)
-            return new ReplaceResult(ReplaceAction.Outcome.Replaced, "Replaced via EM_REPLACESEL.");
+            return new ReplaceOutcome(ReplaceAction.Outcome.Replaced, "Replaced via EM_REPLACESEL.");
 
         // 2) UIA splice: replace only the selection within the full text. Works even when
         //    the visual selection is gone (inference takes seconds).
         bool uia = UiaProbe.ReplaceSelectionViaUia(sourceElement, selectedText, replacement);
         if (uia)
-            return new ReplaceResult(ReplaceAction.Outcome.Replaced, "Replaced via UIA splice.");
+            return new ReplaceOutcome(ReplaceAction.Outcome.Replaced, "Replaced via UIA splice.");
 
         // 3) Clipboard fallback: the result is staged for a manual paste.
         bool clip = ClipboardGuard.WriteText(replacement);
         return clip
-            ? new ReplaceResult(ReplaceAction.Outcome.ClipboardFallback,
-                "The result is on the clipboard. Press Ctrl+V to paste it manually.")
-            : new ReplaceResult(ReplaceAction.Outcome.ClipboardFallback,
+            ? new ReplaceOutcome(ReplaceAction.Outcome.ClipboardFallback,
+                "The result is on the clipboard. Press Ctrl+V to paste it manually.",
+                ClipboardStaged: true)
+            : new ReplaceOutcome(ReplaceAction.Outcome.ClipboardFallback,
                 "The result could not be applied and the clipboard write failed.");
     }
 }

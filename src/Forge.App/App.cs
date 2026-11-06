@@ -150,9 +150,11 @@ public partial class App : Application, IOnboardingHost
     /// <summary>
     /// Direct translate (S16 — the app's only feature path): reads the source app's selection
     /// via UIA, runs it through the S4 pipeline, and replaces the selection in place.
-    /// Feedback comes from three isolated modules: HammerIndicator (working indicator),
-    /// SelectionReplacer (replace), ForgeSounds (clang). Success is silent apart from the
-    /// tray tooltip; failures surface with a MessageBox carrying the specific recovery message.
+    /// Feedback comes from four isolated modules: HammerIndicator (working indicator),
+    /// SelectionReplacer (replace), ForgeSounds (clang), and PasteHint (the quiet "press
+    /// Ctrl+V" card for the clipboard fallback). Success is silent apart from the hammer
+    /// indicator + clang; failures surface with a MessageBox carrying the specific recovery
+    /// message, except the clipboard fallback, which only needs the quiet paste hint.
     /// The caller must have acquired the re-entry guard; it is released when the run finishes.
     /// </summary>
     private async Task RunDirectAsync()
@@ -237,6 +239,15 @@ public partial class App : Application, IOnboardingHost
             {
                 indicator?.Complete(); // final strike, synced with the clang
                 ForgeSounds.PlayClang();
+            }
+            else if (replaceResult.ClipboardStaged)
+            {
+                // The translation succeeded; only the paste is manual. A quiet, non-activating
+                // card over the selection instead of a MessageBox — the dialog would steal
+                // focus, and that is exactly what would keep Ctrl+V from reaching the source app.
+                indicator?.Close();
+                PasteHint.Show(_sourceElement);
+                ForgeSounds.PlayPaper(); // soft paper crinkle — tells "on clipboard" apart from the clang
             }
             else
             {
