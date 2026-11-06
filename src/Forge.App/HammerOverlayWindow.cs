@@ -68,11 +68,11 @@ public sealed class HammerOverlayWindow : Window
         Height = WindowHeight;
 
         var canvas = new Canvas();
-        // Glass card: a dark fill at ~75% opacity so the page behind shows through faintly,
+        // Glass card: a dark fill at ~85% opacity so the page behind shows through faintly,
         // with a top-down rim-light border — the Win11 acrylic look faked in WPF (real DWM
         // Mica/Acrylic cannot apply to a per-pixel-transparent window).
         var glassFill = new LinearGradientBrush(Color.FromRgb(0x26, 0x26, 0x2D), Color.FromRgb(0x1C, 0x1C, 0x22), 90);
-        glassFill.Opacity = 0.75;
+        glassFill.Opacity = 0.85;
         glassFill.Freeze();
         var rimLight = new LinearGradientBrush(Color.FromArgb(0x2A, 0xFF, 0xFF, 0xFF), Colors.Transparent, 90);
         rimLight.Freeze();
