@@ -71,9 +71,9 @@ internal static class Program
                 // --- Sidebar layout check (Handy pattern) ---
                 var sidebar = (settings.Content as Grid)?.Children[0] as Border;
                 if (sidebar is null) throw new Exception("sidebar not found");
-                var navTexts = AllTextBlocks(sidebar).Where(t => t.Text is "Model" or "Engine" or "Hardware" or "Prompts" or "Hotkeys").ToList();
+                var navTexts = AllTextBlocks(sidebar).Where(t => t.Text is "Model" or "Engine" or "Hardware" or "Hotkeys").ToList();
                 Log($"nav items found: {navTexts.Count}");
-                if (navTexts.Count != 5) throw new Exception("expected 5 sidebar nav items");
+                if (navTexts.Count != 4) throw new Exception("expected 4 sidebar nav items");
 
                 // The window's ScrollViewer is a ContentControl subclass, so this finds it;
                 // its .Content is our section host.
@@ -183,7 +183,7 @@ internal static class Program
                     Log($"  closed-field text '{t.Text[..Math.Min(24, t.Text.Length)]}' foreground={BrushName(TextElement.GetForeground(t))}");
 
                 // --- Hotkey capture field checks ---
-                var popupField = (HotkeyField)typeof(SettingsWindow).GetField("_popupBox",
+                var popupField = (HotkeyField)typeof(SettingsWindow).GetField("_translateBox",
                     System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(settings)!;
                 string originalPopup = popupField.Text;
                 Log($"hotkey field: popup.Text='{popupField.Text}'");

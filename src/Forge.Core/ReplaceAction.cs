@@ -4,11 +4,13 @@ using System.Text;
 namespace Forge.Core;
 
 /// <summary>
-/// Best-effort replace (plan §5): focuses the source window captured at task start and
-/// pastes the result over its selection (Ctrl+V via SendInput). No success guarantee —
-/// when focus or the clipboard fails, the result stays on the clipboard with guidance
-/// (clipboard fallback). The clipboard is backed up before and restored after a
-/// successful replace (plan §4: non-destructive).
+/// Source-window capture helpers (plan §5): grabs the foreground window handle and
+/// copies its selection to the clipboard (Ctrl+C via SendInput) so the direct
+/// translate flow does not require the user to press Ctrl+C. The clipboard is read
+/// before and compared after, so an unchanged clipboard means nothing was copied.
+///
+/// The replace itself is owned by the app's SelectionReplacer (EM_REPLACESEL /
+/// UIA splice / clipboard fallback) — this class no longer sends Ctrl+V.
 ///
 /// Win32 P/Invoke only — no UI framework dependency in Core (same approach as
 /// <see cref="TextCapture"/>).
@@ -82,31 +84,6 @@ public static class ReplaceAction
     /// </summary>
     public static IntPtr CaptureSourceWindow() => GetForegroundWindow();
 
-    /// <summary>
-    /// Best-effort replace: puts <paramref name="resultText"/> on the clipboard and
-    /// sends Ctrl+V. Focus was already anchored by the capture step's Ctrl+C —
-    /// no further focus manipulation (matches AltKey's proven approach).
-    /// </summary>
-    public static ReplaceResult TryReplace(string resultText, IntPtr sourceWindow)
-    {
-        if (string.IsNullOrWhiteSpace(resultText))
-            return new ReplaceResult(Outcome.ClipboardFallback, "Nothing to replace — the result is empty.");
-
-        bool clipOk = ClipboardGuard.WriteText(resultText);
-        if (!clipOk)
-            return new ReplaceResult(Outcome.ClipboardFallback,
-                "The clipboard could not be written. Use the Copy button and paste manually.");
-
-        // Longer delay: Chromium needs more time to recognize the clipboard change.
-        Thread.Sleep(500);
-
-        uint sent = SendCtrlV();
-
-        return new ReplaceResult(Outcome.Replaced,
-            "Replaced in the source app.",
-            $"SendInput returned {sent}");
-    }
-
     /// <summary>Support matrix for the core apps (plan §5: best-effort, core apps first).</summary>
     public enum AppSupportLevel
     {
@@ -136,42 +113,6 @@ public static class ReplaceAction
         SupportedApps.FirstOrDefault(e => string.Equals(e.ProcessName, processName, StringComparison.OrdinalIgnoreCase))?.Level
         ?? AppSupportLevel.Unknown;
 
-    /// <summary>Sends Ctrl+V via SendInput so the focused app pastes over its selection.</summary>
-    private static uint SendCtrlV()
-    {
-        var inputs = new INPUT[]
-        {
-            new() { type = InputKeyboard, data = new InputUnion { ki = new KeybdInput { wVk = VkControl, dwFlags = 0 } } },
-            new() { type = InputKeyboard, data = new InputUnion { ki = new KeybdInput { wVk = VkV, dwFlags = 0 } } },
-            new() { type = InputKeyboard, data = new InputUnion { ki = new KeybdInput { wVk = VkControl, dwFlags = KeyEventfKeyUp } } },
-            new() { type = InputKeyboard, data = new InputUnion { ki = new KeybdInput { wVk = VkV, dwFlags = KeyEventfKeyUp } } },
-        };
-        return SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
-    }
-
-    /// <summary>
-    /// Types text character-by-character via SendInput (KEYEVENTF_UNICODE) — the "Handy Direct"
-    /// approach. Replaces any existing selection in the focused field. Works in Chromium
-    /// because individual keystrokes are accepted as normal typing, unlike the Ctrl+V command.
-    /// Returns true when all characters were sent successfully.
-    /// </summary>
-    public static bool TypeViaSendInput(string text)
-    {
-        if (string.IsNullOrEmpty(text))
-            return false;
-
-        foreach (char c in text)
-        {
-            var inputs = new INPUT[]
-            {
-                new() { type = InputKeyboard, data = new InputUnion { ki = new KeybdInput { wScan = c, dwFlags = KeyEventfUnicode } } },
-                new() { type = InputKeyboard, data = new InputUnion { ki = new KeybdInput { wScan = c, dwFlags = KeyEventfUnicode | KeyEventfKeyUp } } },
-            };
-            SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
-        }
-        return true;
-    }
-
     /// <summary>Sends Ctrl+C via SendInput so the focused app copies its selection.</summary>
     private static uint SendCtrlC()
     {
@@ -187,10 +128,8 @@ public static class ReplaceAction
 
     private const int InputKeyboard = 0; // INPUT_KEYBOARD
     private const uint KeyEventfKeyUp = 0x0002;
-    private const uint KeyEventfUnicode = 0x0004;
     private const ushort VkControl = 0x11;
     private const ushort VkC = 0x43;
-    private const ushort VkV = 0x56;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct INPUT

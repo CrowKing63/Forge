@@ -1,89 +1,86 @@
 using System.IO;
 using System.Text.Json;
-using Forge.Core;
 
 namespace Forge.App;
 
 /// <summary>
-/// An immediate-type hotkey: pressing it runs one task directly, without the
-/// overlay (S6). Read from a simple JSON config file; the settings UI that
-/// edits that file is S7 — here we only read it.
-/// </summary>
-public sealed record ImmediateHotkey(ForgeTask Task, HotkeyBinding Binding);
-
-/// <summary>
-/// Reads hotkey bindings from %APPDATA%\Forge\hotkeys.json:
-///   { "popup": "Ctrl+E",
-///     "immediate": [ { "task": "proofread", "hotkey": "Ctrl+Shift+P" } ] }
-/// A missing or invalid file yields the default popup binding and no immediate
-/// hotkeys. Entries that fail to parse are skipped.
+/// Hotkey configuration for the single translate action (S16: the app has one hotkey).
+/// Stored as JSON at %LOCALAPPDATA%\Forge\hotkeys.json. When the file is missing or
+/// corrupt, the default binding (<see cref="DefaultTranslateBinding"/>) is used —
+/// the config can never break the app.
 /// </summary>
 public static class HotkeyConfig
 {
-    /// <summary>Default popup-type binding (S6 spec).</summary>
-    public const string DefaultPopupBinding = "Ctrl+E";
+    /// <summary>The default translate hotkey.</summary>
+    public const string DefaultTranslateBinding = "Ctrl+E";
 
+    /// <summary>%LOCALAPPDATA%\Forge\hotkeys.json</summary>
     public static string ConfigPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Forge", "hotkeys.json");
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Forge", "hotkeys.json");
 
-    public static (string Popup, ImmediateHotkey[] Immediate) Load()
+    /// <summary>
+    /// Loads the translate binding. Reads the "translate" key, falling back to the
+    /// legacy "popup" key (same binding, pre-S16 name) so existing configs keep working.
+    /// </summary>
+    public static string Load()
     {
-        var popup = DefaultPopupBinding;
-        var immediate = new List<ImmediateHotkey>();
-
         try
         {
             if (!File.Exists(ConfigPath))
-                return (popup, immediate.ToArray());
+                return DefaultTranslateBinding;
 
             using var doc = JsonDocument.Parse(File.ReadAllText(ConfigPath));
-            if (doc.RootElement.TryGetProperty("popup", out var p) && p.ValueKind == JsonValueKind.String)
-                popup = p.GetString()!;
-
-            if (doc.RootElement.TryGetProperty("immediate", out var list) && list.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var entry in list.EnumerateArray())
-                {
-                    if (entry.ValueKind != JsonValueKind.Object)
-                        continue;
-                    if (!entry.TryGetProperty("task", out var taskProp) || taskProp.ValueKind != JsonValueKind.String)
-                        continue;
-                    if (!entry.TryGetProperty("hotkey", out var hotkeyProp) || hotkeyProp.ValueKind != JsonValueKind.String)
-                        continue;
-
-                    if (TryParseTask(taskProp.GetString()!, out var task)
-                        && HotkeyBinding.TryParse(hotkeyProp.GetString()!, out var binding))
-                        immediate.Add(new ImmediateHotkey(task, binding));
-                }
-            }
+            JsonElement? el = null;
+            if (doc.RootElement.TryGetProperty("translate", out var t))
+                el = t;
+            else if (doc.RootElement.TryGetProperty("popup", out var p))
+                el = p;
+            if (el.HasValue && el.Value.ValueKind == JsonValueKind.String)
+                return el.Value.GetString()!;
         }
-        catch (Exception)
+        catch
         {
-            // Unreadable/invalid config: fall back to defaults.
+            // Corrupt config → default. The app must stay usable.
         }
-
-        return (popup, immediate.ToArray());
+        return DefaultTranslateBinding;
     }
 
-    private static bool TryParseTask(string name, out ForgeTask task)
+    /// <summary>The hotkey id used when registering the translate binding.</summary>
+    public const int TranslateId = 1;
+
+    /// <summary>
+    /// Parses a "Modifiers+Key" binding (e.g. "Ctrl+V") into Win32 RegisterHotKey
+    /// values: MOD_* modifier flags and a virtual key code. Returns false when the
+    /// binding is not supported (only Ctrl/Alt/Shift/Win + A-Z / 0-9 are valid).
+    /// </summary>
+    public static bool TryParse(string binding, out int modifiers, out int key)
     {
-        switch (name.ToLowerInvariant())
+        modifiers = 0;
+        key = 0;
+
+        var parts = binding.Split('+', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 2)
+            return false;
+
+        for (var i = 0; i < parts.Length - 1; i++)
         {
-            case "proofread":
-                task = ForgeTask.Proofread;
-                return true;
-            case "translate":
-                task = ForgeTask.TranslateKrToEn;
-                return true;
-            case "rewrite":
-                task = ForgeTask.Rewrite;
-                return true;
-            case "summarize":
-                task = ForgeTask.Summarize;
-                return true;
-            default:
-                task = default;
-                return false;
+            switch (parts[i].ToLowerInvariant())
+            {
+                case "ctrl": modifiers |= 0x0002; break; // MOD_CONTROL
+                case "alt": modifiers |= 0x0001; break; // MOD_ALT
+                case "shift": modifiers |= 0x0004; break; // MOD_SHIFT
+                case "win": modifiers |= 0x0008; break; // MOD_WIN
+                default: return false;
+            }
         }
+
+        var last = parts[^1];
+        if (last.Length == 1)
+        {
+            var c = last[0];
+            if (c is >= 'A' and <= 'Z') { key = c; return true; } // VK codes for A-Z are the ASCII values
+            if (c is >= '0' and <= '9') { key = c; return true; }
+        }
+        return false;
     }
 }

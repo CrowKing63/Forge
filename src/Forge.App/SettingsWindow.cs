@@ -12,7 +12,7 @@ namespace Forge.App;
 
 /// <summary>
 /// Settings window (S7), code-only WPF. Left sidebar sections: Model / Engine / Hardware /
-/// Prompts / Hotkeys (Handy-style layout: nav column left, scrollable content right).
+/// Hotkeys (Handy-style layout: nav column left, scrollable content right).
 ///
 /// Persists to <see cref="ForgeSettings"/> (JSON under %LOCALAPPDATA%\Forge). The hotkey tab
 /// is the source of truth the hotkey layer (S6) reads from; the model tab lists every GGUF
@@ -25,7 +25,6 @@ namespace Forge.App;
 public sealed class SettingsWindow : Window
 {
     private readonly ForgeSettings _settings;
-    private readonly Dictionary<ForgeTask, TextBox> _promptBoxes = new();
     private readonly Func<string, Task<bool>>? _applyModel;
     private readonly string _originalModelPath;
 
@@ -36,8 +35,7 @@ public sealed class SettingsWindow : Window
     private RadioButton _cpuRadio = null!;
     private RadioButton _gpuRadio = null!;
     private RadioButton _autoRadio = null!;
-    private HotkeyField _popupBox = null!;
-    private readonly Dictionary<ForgeTask, HotkeyField> _immediateBoxes = new();
+    private HotkeyField _translateBox = null!;
     private TextBlock _status = null!;
     private Border[] _navItems = null!;
     private UIElement[] _sections = null!;
@@ -108,16 +106,15 @@ public sealed class SettingsWindow : Window
         };
         Grid.SetColumn(sidebar, 0);
 
-        string[] names = { "Model", "Engine", "Hardware", "Prompts", "Hotkeys" };
-        _sections = new UIElement[5]
+        string[] names = { "Model", "Engine", "Hardware", "Hotkeys" };
+        _sections = new UIElement[4]
         {
             MakeModelSection(),
             MakeEngineSection(),
             MakeHardwareSection(),
-            MakePromptsSection(),
             MakeHotkeysSection(),
         };
-        _navItems = new Border[5];
+        _navItems = new Border[4];
 
         var nav = new StackPanel();
         for (int i = 0; i < names.Length; i++)
@@ -264,47 +261,15 @@ public sealed class SettingsWindow : Window
         return MakeCard(panel);
     }
 
-    private UIElement MakePromptsSection()
-    {
-        var panel = new StackPanel();
-        panel.Children.Add(MakeHint("System prompts sent with each task. Leave them as-is unless you know what you are changing."));
-        foreach (var task in Enum.GetValues<ForgeTask>())
-        {
-            var box = new TextBox
-            {
-                AcceptsReturn = true,
-                TextWrapping = TextWrapping.Wrap,
-                Height = 64,
-                Margin = new Thickness(0, 12, 0, 0),
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            };
-            box.LostFocus += (_, _) => TryAutoSave();
-            panel.Children.Add(MakeLabel(task.ToString()));
-            panel.Children.Add(box);
-            _promptBoxes[task] = box;
-        }
-        return MakeCard(panel);
-    }
-
     private UIElement MakeHotkeysSection()
     {
         var panel = new StackPanel();
-        panel.Children.Add(MakeHint("Click a field, then press the key combination (e.g. Ctrl+Shift+E). Press Esc while recording to clear it."));
+        panel.Children.Add(MakeHint("Click a field, then press the key combination (e.g. Ctrl+E). Press Esc while recording to clear it."));
 
-        _popupBox = new HotkeyField { Margin = new Thickness(0, 4, 0, 12), Width = 180 };
-        _popupBox.ValueChanged += (_, _) => TryAutoSave();
-        panel.Children.Add(MakeLabel("Open overlay (popup)"));
-        panel.Children.Add(_popupBox);
-
-        panel.Children.Add(MakeSectionLabel("Immediate hotkeys (one task per binding)"));
-        foreach (var task in Enum.GetValues<ForgeTask>())
-        {
-            var field = new HotkeyField { Margin = new Thickness(0, 4, 0, 12), Width = 180 };
-            field.ValueChanged += (_, _) => TryAutoSave();
-            panel.Children.Add(MakeLabel(task.ToString()));
-            panel.Children.Add(field);
-            _immediateBoxes[task] = field;
-        }
+        _translateBox = new HotkeyField { Margin = new Thickness(0, 4, 0, 12), Width = 180 };
+        _translateBox.ValueChanged += (_, _) => TryAutoSave();
+        panel.Children.Add(MakeLabel("Translate"));
+        panel.Children.Add(_translateBox);
 
         return MakeCard(panel);
     }
@@ -375,17 +340,8 @@ public sealed class SettingsWindow : Window
         _gpuRadio.IsChecked = _settings.Hardware == HardwareMode.Gpu;
         _autoRadio.IsChecked = _settings.Hardware == HardwareMode.Auto;
 
-        foreach (var task in Enum.GetValues<ForgeTask>())
-            _promptBoxes[task].Text = _settings.Prompts.TryGetValue(task.ToString(), out var prompt)
-                ? prompt
-                : PromptBuilder.SystemPrompt(task);
-
         // Hotkeys come from the config file the hotkey layer (S6) reads.
-        var (popup, immediate) = HotkeyConfig.Load();
-        _popupBox.Text = popup;
-        foreach (var h in immediate)
-            if (_immediateBoxes.TryGetValue(h.Task, out var box))
-                box.Text = HotkeyText(h.Binding);
+        _translateBox.Text = HotkeyConfig.Load();
     }
 
     /// <summary>
@@ -417,32 +373,18 @@ public sealed class SettingsWindow : Window
         _settings.Hardware = _gpuRadio.IsChecked == true ? HardwareMode.Gpu
             : _autoRadio.IsChecked == true ? HardwareMode.Auto
             : HardwareMode.Cpu;
-        foreach (var (task, box) in _promptBoxes)
-            _settings.Prompts[task.ToString()] = box.Text;
 
-        string popup = _popupBox.Text.Trim();
-        if (!HotkeyBinding.TryParse(popup, out _))
+        string translate = _translateBox.Text.Trim();
+        if (!HotkeyBinding.TryParse(translate, out _))
         {
-            SetStatus("Invalid overlay hotkey (expected e.g. \"Ctrl+E\").");
+            SetStatus("Invalid translate hotkey (expected e.g. \"Ctrl+E\").");
             return;
-        }
-        var immediate = new List<ImmediateHotkey>();
-        foreach (var (task, box) in _immediateBoxes)
-        {
-            string text = box.Text.Trim();
-            if (text.Length == 0) continue;
-            if (!HotkeyBinding.TryParse(text, out var binding))
-            {
-                SetStatus($"Invalid hotkey for {task} (expected e.g. \"Ctrl+Shift+P\").");
-                return;
-            }
-            immediate.Add(new ImmediateHotkey(task, binding));
         }
 
         try
         {
             _settings.Save();
-            SaveHotkeys(popup, immediate);
+            SaveHotkeys(translate);
             if (modelChanged && _applyModel is not null)
             {
                 SetStatus("Switching model…");
@@ -465,28 +407,16 @@ public sealed class SettingsWindow : Window
     }
 
     /// <summary>Writes the hotkey config file that the hotkey layer (S6) reads.</summary>
-    private static void SaveHotkeys(string popup, List<ImmediateHotkey> immediate)
+    private static void SaveHotkeys(string translate)
     {
-        var payload = new
-        {
-            popup,
-            immediate = immediate.Select(h => new { task = TaskName(h.Task), hotkey = HotkeyText(h.Binding) }),
-        };
+        var payload = new { translate };
         var dir = Path.GetDirectoryName(HotkeyConfig.ConfigPath);
         if (dir is not null) Directory.CreateDirectory(dir);
         File.WriteAllText(HotkeyConfig.ConfigPath,
             JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
     }
 
-    private static string TaskName(ForgeTask task) => task switch
-    {
-        ForgeTask.Proofread => "proofread",
-        ForgeTask.TranslateKrToEn => "translate",
-        ForgeTask.Rewrite => "rewrite",
-        _ => "summarize",
-    };
-
-    /// <summary>Formats a parsed binding back into its "Ctrl+Shift+E" display form.</summary>
+    /// <summary>Formats a parsed binding back into its "Ctrl+E" display form.</summary>
     private static string HotkeyText(HotkeyBinding b)
     {
         var parts = new List<string>();

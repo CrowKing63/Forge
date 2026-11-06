@@ -1,129 +1,69 @@
 namespace Forge.Core;
 
 /// <summary>
-/// The cleaned model output plus detection flags, produced by <see cref="ResultParser"/>.
-/// </summary>
-public sealed class ParsedResult
-{
-    /// <summary>The output after trimming and code-fence removal.</summary>
-    public string Text { get; }
-
-    /// <summary>True when the cleaned text is empty or whitespace-only.</summary>
-    public bool IsEmpty { get; }
-
-    /// <summary>True when the output looks like a refusal/error message.</summary>
-    public bool HasError { get; }
-
-    /// <summary>
-    /// True when a task (and, for same-language tasks, source text) was supplied and the
-    /// output's language differs from the expected one. Always false when no task is given.
-    /// </summary>
-    public bool LanguageMismatch { get; }
-
-    internal ParsedResult(string text, bool isEmpty, bool hasError, bool languageMismatch)
-    {
-        Text = text;
-        IsEmpty = isEmpty;
-        HasError = hasError;
-        LanguageMismatch = languageMismatch;
-    }
-}
-
-/// <summary>
-/// Cleans and validates raw model output. Pure and deterministic: no I/O, same input → same output.
-///
-/// <see cref="Parse"/> trims whitespace, strips surrounding code fences, and flags three
-/// conditions: empty output, refusal/error output, and language leakage (output in the wrong
-/// language for the task). The language check needs a <paramref name="task"/>, and for
-/// same-language tasks also the source text to know which language is expected.
-/// Diff computation is the UI's job (S7); prompt-quality tuning is S13.
+/// Parses raw model output into clean result text. Flags three failure modes:
+/// empty output, a refusal, and a language leak — the translation must come out
+/// in English, so if the output is (mostly) Korean it did not translate.
 /// </summary>
 public static class ResultParser
 {
-    private static readonly string[] ErrorMarkers =
+    public sealed record ParseResult(string Text, bool IsEmpty, bool HasError, bool LanguageMismatch);
+
+    /// <param name="raw">The model output (after family-specific marker cleaning by <see cref="OutputPostProcessor"/>).</param>
+    public static ParseResult Parse(string? raw)
     {
-        "i'm sorry", "i am sorry", "i cannot", "i can't", "as an ai",
-        "죄송합니다", "할 수 없습니다",
-    };
+        if (string.IsNullOrEmpty(raw))
+            return new ParseResult("", true, false, false);
+
+        var text = StripCodeFences(raw).Trim();
+        var isEmpty = text.Length == 0;
+        var hasError = !isEmpty && DetectRefusal(text);
+        var languageMismatch = !isEmpty && IsMostlyHangul(text);
+        return new ParseResult(text, isEmpty, hasError, languageMismatch);
+    }
 
     /// <summary>
-    /// Cleans <paramref name="raw"/> and flags empty, error, and language-leak conditions.
+    /// Strips markdown code fences models sometimes wrap around their output:
+    /// balanced fences (with or without a language tag), single-line fences, and
+    /// an unbalanced opening fence. Plain text passes through unchanged.
     /// </summary>
-    /// <param name="raw">Raw model output.</param>
-    /// <param name="sourceText">Original selected text (needed for same-language tasks' check).</param>
-    /// <param name="task">The task the output was produced for; enables the language check.</param>
-    public static ParsedResult Parse(string raw, string? sourceText = null, ForgeTask? task = null)
+    private static string StripCodeFences(string raw)
     {
-        string text = StripCodeFences(raw);
-        bool isEmpty = string.IsNullOrWhiteSpace(text);
-        bool hasError = !isEmpty && DetectError(text);
-        bool languageMismatch = DetermineLanguageMismatch(text, sourceText, task);
+        var t = raw.Trim();
+        if (!t.StartsWith("```")) return t;
 
-        return new ParsedResult(text, isEmpty, hasError, languageMismatch);
+        // Balanced: ```...``` on one line, or an opening fence line + content + closing fence.
+        if (t.EndsWith("```") && t.Length > 6)
+            return t[3..^3].Trim();
+
+        // Unbalanced opening fence: drop the fence line, keep the rest.
+        var firstNewline = t.IndexOf('\n');
+        if (firstNewline < 0) return t;
+        return t[(firstNewline + 1)..].Trim();
     }
 
-    internal static string StripCodeFences(string raw)
+    /// <summary>Detects a refusal ("I'm sorry…", "죄송합니다…") in the output.</summary>
+    private static bool DetectRefusal(string text)
     {
-        string s = (raw ?? string.Empty).Trim();
-        if (!s.StartsWith("```")) return s;
+        var t = text.Trim().ToLowerInvariant();
+        return t.StartsWith("i'm sorry") || t.StartsWith("i am sorry")
+            || t.Contains("cannot help") || t.Contains("can't help")
+            || t.StartsWith("죄송합니다") || t.Contains("할 수 없습니다");
+    }
 
-        int contentStart = s.IndexOf('\n');
-        if (contentStart < 0)
+    /// <summary>True when the letters of <paramref name="s"/> are mostly Hangul syllables.</summary>
+    private static bool IsMostlyHangul(string s)
+    {
+        var letters = 0;
+        var hangul = 0;
+        foreach (var c in s)
         {
-            // Single-line fence: ```content```
-            if (s.EndsWith("```") && s.Length > 6)
-                return s.Substring(3, s.Length - 6).Trim();
-            return s;
+            if (char.IsLetter(c))
+            {
+                letters++;
+                if (c >= '\uAC00' && c <= '\uD7A3') hangul++;
+            }
         }
-
-        contentStart += 1; // skip past the newline that ends the opening fence line
-        int closeStart = s.LastIndexOf("```", StringComparison.Ordinal);
-        if (closeStart > contentStart)
-            return s.Substring(contentStart, closeStart - contentStart).Trim();
-
-        // Unbalanced: no closing fence — drop only the opening fence line.
-        return s.Substring(contentStart).Trim();
-    }
-
-    internal static bool DetectError(string text)
-    {
-        string lower = text.ToLowerInvariant();
-        foreach (var marker in ErrorMarkers)
-            if (lower.Contains(marker, StringComparison.Ordinal))
-                return true;
-        return false;
-    }
-
-    internal static bool DetermineLanguageMismatch(string text, string? sourceText, ForgeTask? task)
-    {
-        if (task is null || string.IsNullOrWhiteSpace(text)) return false;
-
-        bool outKorean = IsPredominantlyKorean(text);
-
-        switch (task.Value)
-        {
-            case ForgeTask.TranslateKrToEn:
-                // Expected output is English → flag when it came out Korean.
-                return outKorean;
-            case ForgeTask.Proofread:
-            case ForgeTask.Rewrite:
-            case ForgeTask.Summarize:
-                // Expected output matches the source language; can't judge without it.
-                if (string.IsNullOrWhiteSpace(sourceText)) return false;
-                return outKorean != IsPredominantlyKorean(sourceText);
-            default:
-                return false;
-        }
-    }
-
-    internal static bool IsPredominantlyKorean(string text)
-    {
-        int korean = 0, latin = 0;
-        foreach (char c in text)
-        {
-            if (c >= 0xAC00 && c <= 0xD7A3) korean++;              // Hangul syllables
-            else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) latin++;
-        }
-        return korean > latin;
+        return letters > 0 && hangul * 2 > letters;
     }
 }

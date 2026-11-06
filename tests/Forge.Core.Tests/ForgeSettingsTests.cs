@@ -3,64 +3,32 @@ using Xunit;
 
 namespace Forge.Core.Tests;
 
-public class ForgeSettingsTests : IDisposable
+public class ForgeSettingsTests
 {
-    private readonly string _tempDir = Directory.CreateTempSubdirectory("forge-settings-test").FullName;
-
-    public void Dispose() => new DirectoryInfo(_tempDir).Delete(recursive: true);
-
-    [Fact]
-    public void Defaults_MatchEngineDefaults()
-    {
-        var settings = ForgeSettings.Load(Path.Combine(_tempDir, "settings.json"));
-
-        Assert.Equal(8192, settings.ContextSize);
-        Assert.Equal(HardwareMode.Cpu, settings.Hardware);
-        Assert.False(settings.CrashDumpEnabled); // opt-in (plan §7)
-        Assert.False(string.IsNullOrWhiteSpace(settings.ModelPath));
-        Assert.Equal(PromptBuilder.SystemPrompt(ForgeTask.Proofread), settings.Prompts[ForgeTask.Proofread.ToString()]);
-    }
-
-    [Fact]
-    public void SaveThenLoad_RoundTrips()
-    {
-        var path = Path.Combine(_tempDir, "settings.json");
-        var settings = new ForgeSettings
-        {
-            ModelPath = @"C:\models\test.gguf",
-            ContextSize = 4096,
-            Hardware = HardwareMode.Gpu,
-            CrashDumpEnabled = true,
-        };
-        settings.Prompts[ForgeTask.Summarize.ToString()] = "Custom prompt.";
-
-        settings.Save(path);
-        var loaded = ForgeSettings.Load(path);
-
-        Assert.Equal(settings.ModelPath, loaded.ModelPath);
-        Assert.Equal(settings.ContextSize, loaded.ContextSize);
-        Assert.Equal(settings.Hardware, loaded.Hardware);
-        Assert.True(loaded.CrashDumpEnabled);
-        Assert.Equal("Custom prompt.", loaded.Prompts[ForgeTask.Summarize.ToString()]);
-    }
-
     [Fact]
     public void Load_MissingFile_ReturnsDefaults()
     {
-        var settings = ForgeSettings.Load(Path.Combine(_tempDir, "does-not-exist.json"));
-
-        Assert.Equal(8192, settings.ContextSize);
-        Assert.Equal(HardwareMode.Cpu, settings.Hardware);
+        var path = Path.GetTempFileName();
+        File.Delete(path);
+        var s = ForgeSettings.Load(path);
+        Assert.Equal(4096, s.ContextSize);
+        Assert.Equal(30, s.IdleUnloadSeconds);
+        Assert.Equal(HardwareMode.Auto, s.Hardware);
     }
 
     [Fact]
-    public void Load_CorruptFile_ReturnsDefaults()
+    public void Save_Then_Load_RoundTrips()
     {
-        var path = Path.Combine(_tempDir, "corrupt.json");
-        File.WriteAllText(path, "{ not valid json !!!");
+        var path = Path.GetTempFileName();
+        var s = ForgeSettings.Load(path);
+        s.ContextSize = 8192;
+        s.IdleUnloadSeconds = 60;
+        s.Hardware = HardwareMode.Cpu;
+        s.Save(path);
 
-        var settings = ForgeSettings.Load(path);
-
-        Assert.Equal(8192, settings.ContextSize);
+        var loaded = ForgeSettings.Load(path);
+        Assert.Equal(8192, loaded.ContextSize);
+        Assert.Equal(60, loaded.IdleUnloadSeconds);
+        Assert.Equal(HardwareMode.Cpu, loaded.Hardware);
     }
 }

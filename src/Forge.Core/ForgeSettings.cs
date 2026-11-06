@@ -45,20 +45,9 @@ public sealed class ForgeSettings
     /// </summary>
     public bool CrashDumpEnabled { get; set; } = false;
 
-    /// <summary>Per-task system prompts, keyed by <c>ForgeTask</c> name. Defaults from <see cref="PromptBuilder"/>.</summary>
-    public Dictionary<string, string> Prompts { get; set; } = DefaultPrompts();
-
     /// <summary>%LOCALAPPDATA%\Forge\settings.json</summary>
     public static string DefaultConfigPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Forge", "settings.json");
-
-    private static Dictionary<string, string> DefaultPrompts()
-    {
-        var prompts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var task in Enum.GetValues<ForgeTask>())
-            prompts[task.ToString()] = PromptBuilder.SystemPrompt(task);
-        return prompts;
-    }
 
     /// <summary>
     /// Loads settings from <paramref name="path"/> (default: <see cref="DefaultConfigPath"/>).
