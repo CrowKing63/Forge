@@ -4,10 +4,13 @@ using System.Windows.Interop;
 namespace Forge.App;
 
 /// <summary>
-/// Global hotkeys via Win32 RegisterHotKey (S6). A hidden 1x1 HwndSource owns a
-/// real HWND; WM_HOTKEY arrives on the UI thread through its hook. Registration
-/// can fail when the combination is already in use by another app — callers
-/// must handle that gracefully and continue without the binding.
+/// Global hotkeys via Win32 RegisterHotKey (S6). A message-only HwndSource (parent HWND_MESSAGE)
+/// owns a real HWND; WM_HOTKEY arrives on the UI thread through an AddHook. Message-only windows
+/// are never shown on screen — no title bar, taskbar entry, or Alt+Tab presence — so startup
+/// shows no flash at all. No window class is registered (no RegisterClassEx), which sidesteps the
+/// ERROR_INVALID_PARAMETER failure the native CreateWindowEx path hit. Registration can fail when
+/// the combination is already in use by another app — callers must handle that gracefully and
+/// continue without the binding.
 /// </summary>
 public sealed class HotkeyManager : IDisposable
 {
@@ -20,19 +23,26 @@ public sealed class HotkeyManager : IDisposable
     /// <summary>Creates the hidden message window. Must be called on the UI thread.</summary>
     public void Initialize()
     {
-        if (_source is not null)
+        if (_source != null)
             return;
-        _source = new HwndSource(new HwndSourceParameters("ForgeHotkeys", 1, 1));
-        ShowWindow(_source.Handle, SW_HIDE); // hidden message window — never shown on screen or in the taskbar
-        _source.AddHook(OnWmHotKey);
+        var parameters = new HwndSourceParameters("ForgeHotkeys")
+        {
+            // HWND_MESSAGE (-3): the window becomes message-only — invisible by design,
+            // never painted, no taskbar entry, no Alt+Tab presence.
+            ParentWindow = new IntPtr(-3),
+        };
+        _source = new HwndSource(parameters);
+        _source.AddHook(WndProcHook);
     }
 
     /// <summary>Registers a hotkey. Returns false when the combination is already in use.</summary>
     public bool Register(int id, int modifiers, int key)
     {
-        if (_source is null)
+        if (_source == null)
             throw new InvalidOperationException("Initialize() must be called first.");
-        if (!NativeMethods.RegisterHotKey(_source.Handle, id, (uint)modifiers, (uint)key))
+        // MOD_NOREPEAT (0x4000): without it, holding the key floods WM_HOTKEY dozens of times.
+        const int MOD_NOREPEAT = 0x4000;
+        if (!NativeMethods.RegisterHotKey(_source.Handle, id, (uint)(modifiers | MOD_NOREPEAT), (uint)key))
             return false;
         _registeredIds.Add(id);
         return true;
@@ -41,7 +51,7 @@ public sealed class HotkeyManager : IDisposable
     /// <summary>Unregisters everything registered so far. Safe to call repeatedly.</summary>
     public void UnregisterAll()
     {
-        if (_source is null)
+        if (_source == null)
             return;
         foreach (var id in _registeredIds)
             NativeMethods.UnregisterHotKey(_source.Handle, id);
@@ -50,13 +60,18 @@ public sealed class HotkeyManager : IDisposable
 
     private const int WM_HOTKEY = 0x0312;
 
-    private IntPtr OnWmHotKey(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    /// <summary>
+    /// HwndSource hook. Runs on the UI thread: WPF's dispatcher pumps the standard Win32 message
+    /// loop, which dispatches WM_HOTKEY (posted by RegisterHotKey) to this hook.
+    /// </summary>
+    private IntPtr WndProcHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        if (msg != WM_HOTKEY)
-            return IntPtr.Zero; // not a hotkey message — let it through untouched
-        // WM_HOTKEY carries the registered id in wParam; lParam's low word is the key's scan code.
-        HotkeyPressed?.Invoke(wParam.ToInt32());
-        handled = true;
+        if (msg == WM_HOTKEY)
+        {
+            HotkeyPressed?.Invoke(wParam.ToInt32());
+            handled = true;
+            return IntPtr.Zero;
+        }
         return IntPtr.Zero;
     }
 
@@ -67,17 +82,14 @@ public sealed class HotkeyManager : IDisposable
         _source = null;
     }
 
-    [DllImport("user32.dll")]
-    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-
-    private const int SW_HIDE = 0;
-
     internal static class NativeMethods
     {
         [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
 
         [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool UnregisterHotKey(IntPtr hWnd, int id);
     }
 }
