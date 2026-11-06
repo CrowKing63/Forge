@@ -73,15 +73,16 @@ public partial class App : Application
 
         _engine = new InferenceEngine(_settings.ContextSize, _gpuLayers);
         BuildTray();
-        SetState(ModelState.Loading, "Forge: loading model…");
+        // S17: no startup model load — the model loads on demand at the first translation
+        // and is unloaded per the settings' unload choice. Start ready; loading shows up
+        // in the tray only while a translation actually runs.
+        SetState(ModelState.Ready, "Forge: ready (model loads on demand)");
 
         SetupHotkeys();
         StartIdleTimer();
 
         if (e.Args.Contains("--smoke-crash"))
             _ = SmokeCrashAsync(); // S12 smoke hook: exercises the global handler + crash dump
-
-        _ = LoadModelAsync(modelPath);
     }
 
     /// <summary>Maps the settings' hardware choice to a GPU layer count via detection.</summary>
@@ -148,19 +149,15 @@ public partial class App : Application
         // source element's screen rectangle can't be resolved.
         var indicator = HammerIndicator.Show(_sourceElement);
 
-        // S8 on-demand reload: the model may have been idle-unloaded since the last task.
+        // S17 on-demand load: the model is not loaded at startup — it loads here, on the
+        // first translation (and again after an idle unload). LoadModelAsync also runs the
+        // first-run onboarding download when the file is missing.
         if (!engine.IsLoaded)
         {
             DebugLog.Write("direct translate: model load started");
-            try
+            if (!await LoadModelAsync(_modelPath))
             {
-                await Task.Run(() => engine.LoadModel(_modelPath));
-            }
-            catch (Exception ex)
-            {
-                DebugLog.Write($"direct translate failed to load model: {ex.Message}");
-                SetState(ModelState.Error, $"Forge: model failed to load — {ex.Message}");
-                MessageBox.Show($"Model failed to load — {ex.Message}. Open Settings to check the model path.",
+                MessageBox.Show("Model failed to load — open Settings to check the model.",
                     "Forge", MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
             }
@@ -202,7 +199,7 @@ public partial class App : Application
             DebugLog.Write($"direct translate: inference done ({sb.Length} chars)");
 
             var result = ResultParser.Parse(OutputPostProcessor.Clean(sb.ToString(), family));
-            _idle?.NotifyInferenceCompleted(); // S8: reset the idle-unload timer
+            UnloadAfterInference(); // S17: apply the unload choice (immediate release or idle timer)
 
             if (result.IsEmpty)
             {
@@ -305,7 +302,7 @@ public partial class App : Application
         try
         {
             await Task.Run(() => _engine!.LoadModel(modelPath));
-            _idle?.NotifyInferenceCompleted(); // S8: arm the idle timer from (re)load
+            ArmIdleUnload(); // S17: arm the idle timer from (re)load, per current settings
             if (_engine!.FellBackToCpu)
                 SetState(ModelState.Ready, "Forge: ready (GPU unavailable — using CPU)");
             else
@@ -314,7 +311,7 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            DebugLog.Write($"model failed to load at startup: {ex}");
+            DebugLog.Write($"model failed to load: {ex}");
             SetState(ModelState.Error, $"Forge: model failed to load — {ex.Message}. Open Settings to check the model path.");
             return false;
         }
@@ -337,8 +334,10 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// Hot-swaps the loaded model without a restart (S9): unloads the current model,
-    /// re-resolves GPU layers for the new file, and loads it. Refused while a task is
+    /// Hot-swaps the configured model without a restart (S9): releases the currently loaded
+    /// model so its memory is freed, and points the app at the new file. S17: it does NOT
+    /// load the new model — loading is on demand at the next translation (which also runs
+    /// the first-run onboarding download if the file is missing). Refused while a task is
     /// running. Returns true on success so the settings window can report the outcome.
     /// </summary>
     private async Task<bool> SwapModelAsync(string newPath)
@@ -354,13 +353,38 @@ public partial class App : Application
         DebugLog.Write($"model swap: {newPath} (gpu layers: {_gpuLayers})");
 
         await Task.Run(() => _engine!.Unload());
-        return await LoadModelAsync(newPath);
+        _idle = null; // the old model is gone; ArmIdleUnload re-arms after the next load
+        return true;
     }
 
     private void StartIdleTimer()
     {
+        // S17: the manager is created per-arm in ArmIdleUnload (the settings may change
+        // while the app runs); this timer just ticks whatever is armed.
+        _idleTimer = new System.Threading.Timer(
+            _ => _idle?.Tick(),
+            null,
+            TimeSpan.FromSeconds(1),
+            TimeSpan.FromSeconds(1));
+    }
+
+    /// <summary>
+    /// Arms (or clears) the idle-unload timer from the CURRENT settings. Called after every
+    /// model load, so a settings change takes effect from the next run without a restart.
+    /// "Never" and "Immediate" leave nothing armed — Immediate is handled at inference end.
+    /// </summary>
+    private void ArmIdleUnload()
+    {
+        var unloadAfter = ForgeSettings.Load().UnloadAfter;
+        if (unloadAfter == ModelUnloadAfter.None || unloadAfter == ModelUnloadAfter.Immediate)
+        {
+            _idle = null;
+            return;
+        }
+
+        int timeoutSeconds = unloadAfter == ModelUnloadAfter.OneMinute ? 60 : 300;
         _idle = new IdleUnloadManager(
-            timeoutSeconds: _settings.IdleUnloadSeconds,
+            timeoutSeconds: timeoutSeconds,
             isLoaded: () => _engine?.IsLoaded ?? false,
             unload: () =>
             {
@@ -368,12 +392,24 @@ public partial class App : Application
                 Task.Run(() => _engine?.Unload());
                 SetState(ModelState.Ready, "Forge: idle (model unloaded)");
             });
+        _idle.NotifyInferenceCompleted();
+    }
 
-        _idleTimer = new System.Threading.Timer(
-            _ => _idle.Tick(),
-            null,
-            TimeSpan.FromSeconds(1),
-            TimeSpan.FromSeconds(1));
+    /// <summary>
+    /// After a finished translation: applies the current settings' unload choice.
+    /// "Immediate" releases the model right away; the timed options arm the idle timer.
+    /// </summary>
+    private void UnloadAfterInference()
+    {
+        if (ForgeSettings.Load().UnloadAfter == ModelUnloadAfter.Immediate)
+        {
+            DebugLog.Write("immediate unload — releasing model after translation");
+            _idle = null;
+            Task.Run(() => _engine?.Unload());
+            SetState(ModelState.Ready, "Forge: idle (model unloaded)");
+            return;
+        }
+        ArmIdleUnload();
     }
 
     // ---- S3 smoke test: crash the app on purpose to exercise the crash-dump path ----

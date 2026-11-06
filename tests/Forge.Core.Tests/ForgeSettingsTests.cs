@@ -11,9 +11,9 @@ public class ForgeSettingsTests
         var path = Path.GetTempFileName();
         File.Delete(path);
         var s = ForgeSettings.Load(path);
-        Assert.Equal(4096, s.ContextSize);
-        Assert.Equal(30, s.IdleUnloadSeconds);
-        Assert.Equal(HardwareMode.Auto, s.Hardware);
+        Assert.Equal(8192, s.ContextSize);
+        Assert.Equal(ModelUnloadAfter.OneMinute, s.UnloadAfter);
+        Assert.Equal(HardwareMode.Cpu, s.Hardware);
     }
 
     [Fact]
@@ -21,14 +21,34 @@ public class ForgeSettingsTests
     {
         var path = Path.GetTempFileName();
         var s = ForgeSettings.Load(path);
-        s.ContextSize = 8192;
-        s.IdleUnloadSeconds = 60;
-        s.Hardware = HardwareMode.Cpu;
+        s.ContextSize = 4096;
+        s.UnloadAfter = ModelUnloadAfter.FiveMinutes;
+        s.Hardware = HardwareMode.Gpu;
         s.Save(path);
 
         var loaded = ForgeSettings.Load(path);
-        Assert.Equal(8192, loaded.ContextSize);
-        Assert.Equal(60, loaded.IdleUnloadSeconds);
-        Assert.Equal(HardwareMode.Cpu, loaded.Hardware);
+        Assert.Equal(4096, loaded.ContextSize);
+        Assert.Equal(ModelUnloadAfter.FiveMinutes, loaded.UnloadAfter);
+        Assert.Equal(HardwareMode.Gpu, loaded.Hardware);
+    }
+
+    [Fact]
+    public void Load_OldFileWithIdleUnloadSeconds_IgnoresUnknownKey()
+    {
+        // S17 migration: settings.json files written before the UnloadAfter enum
+        // carry "IdleUnloadSeconds"; unknown keys must deserialize to defaults.
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+        {
+          "ModelPath": "x.gguf",
+          "ContextSize": 8192,
+          "IdleUnloadSeconds": 120,
+          "Hardware": "Cpu",
+          "CrashDumpEnabled": false
+        }
+        """);
+
+        var loaded = ForgeSettings.Load(path);
+        Assert.Equal(ModelUnloadAfter.OneMinute, loaded.UnloadAfter);
     }
 }

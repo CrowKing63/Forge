@@ -30,8 +30,10 @@ public sealed class SettingsWindow : Window
 
     private ComboBox _modelBox = null!;
     private TextBox _contextBox = null!;
-    private TextBox _idleBox = null!;
-    private CheckBox _crashDumpCheck = null!;
+    private RadioButton _unloadImmediateRadio = null!;
+    private RadioButton _unloadOneMinRadio = null!;
+    private RadioButton _unloadFiveMinRadio = null!;
+    private RadioButton _unloadNeverRadio = null!;
     private RadioButton _cpuRadio = null!;
     private RadioButton _gpuRadio = null!;
     private RadioButton _autoRadio = null!;
@@ -219,17 +221,20 @@ public sealed class SettingsWindow : Window
         panel.Children.Add(MakeLabel("Context size (tokens)"));
         panel.Children.Add(_contextBox);
 
-        _idleBox = new TextBox { Margin = new Thickness(0, 4, 0, 12), Width = 140 };
-        _idleBox.LostFocus += (_, _) => TryAutoSave();
-        panel.Children.Add(MakeLabel("Idle unload (seconds)"));
-        panel.Children.Add(MakeHint("The model is unloaded after this much idle time and reloaded on demand."));
-        panel.Children.Add(_idleBox);
-
-        _crashDumpCheck = new CheckBox { Margin = new Thickness(0, 4, 0, 0), Content = "Write crash dumps on fatal errors" };
-        _crashDumpCheck.Checked += (_, _) => TryAutoSave();
-        _crashDumpCheck.Unchecked += (_, _) => TryAutoSave();
-        panel.Children.Add(_crashDumpCheck);
-        panel.Children.Add(MakeHint("Dumps record the stack and model path only — no text content."));
+        // S17: the model loads on demand at translation time; these choose when it is
+        // unloaded afterwards. Fixed choices, not a free-form seconds field.
+        _unloadImmediateRadio = MakeRadio("Unload immediately after each translation");
+        _unloadOneMinRadio = MakeRadio("Unload after 1 minute of idle time");
+        _unloadFiveMinRadio = MakeRadio("Unload after 5 minutes of idle time");
+        _unloadNeverRadio = MakeRadio("Keep loaded (never unload)");
+        foreach (var radio in new[] { _unloadImmediateRadio, _unloadOneMinRadio, _unloadFiveMinRadio, _unloadNeverRadio })
+            radio.Checked += (_, _) => TryAutoSave();
+        panel.Children.Add(MakeLabel("Model unload"));
+        panel.Children.Add(MakeHint("The model loads when you translate and frees memory after this much idle time."));
+        panel.Children.Add(_unloadImmediateRadio);
+        panel.Children.Add(_unloadOneMinRadio);
+        panel.Children.Add(_unloadFiveMinRadio);
+        panel.Children.Add(_unloadNeverRadio);
 
         return MakeCard(panel);
     }
@@ -333,8 +338,10 @@ public sealed class SettingsWindow : Window
         _modelBox.SelectedItem = selected ?? _modelBox.Items.Cast<ModelChoice>().First();
 
         _contextBox.Text = _settings.ContextSize.ToString();
-        _idleBox.Text = _settings.IdleUnloadSeconds.ToString();
-        _crashDumpCheck.IsChecked = _settings.CrashDumpEnabled;
+        _unloadImmediateRadio.IsChecked = _settings.UnloadAfter == ModelUnloadAfter.Immediate;
+        _unloadOneMinRadio.IsChecked = _settings.UnloadAfter == ModelUnloadAfter.OneMinute;
+        _unloadFiveMinRadio.IsChecked = _settings.UnloadAfter == ModelUnloadAfter.FiveMinutes;
+        _unloadNeverRadio.IsChecked = _settings.UnloadAfter == ModelUnloadAfter.None;
 
         _cpuRadio.IsChecked = _settings.Hardware == HardwareMode.Cpu;
         _gpuRadio.IsChecked = _settings.Hardware == HardwareMode.Gpu;
@@ -356,11 +363,6 @@ public sealed class SettingsWindow : Window
             SetStatus("Context size must be a positive number.");
             return;
         }
-        if (!int.TryParse(_idleBox.Text, out int idleSeconds) || idleSeconds <= 0)
-        {
-            SetStatus("Idle unload must be a positive number of seconds.");
-            return;
-        }
 
         var choice = _modelBox.SelectedItem as ModelChoice;
         string newModelPath = choice?.Path ?? "";
@@ -368,8 +370,10 @@ public sealed class SettingsWindow : Window
 
         _settings.ModelPath = newModelPath;
         _settings.ContextSize = contextSize;
-        _settings.IdleUnloadSeconds = idleSeconds;
-        _settings.CrashDumpEnabled = _crashDumpCheck.IsChecked == true;
+        _settings.UnloadAfter = _unloadImmediateRadio.IsChecked == true ? ModelUnloadAfter.Immediate
+            : _unloadFiveMinRadio.IsChecked == true ? ModelUnloadAfter.FiveMinutes
+            : _unloadOneMinRadio.IsChecked == true ? ModelUnloadAfter.OneMinute
+            : ModelUnloadAfter.None;
         _settings.Hardware = _gpuRadio.IsChecked == true ? HardwareMode.Gpu
             : _autoRadio.IsChecked == true ? HardwareMode.Auto
             : HardwareMode.Cpu;
@@ -403,7 +407,8 @@ public sealed class SettingsWindow : Window
     private async Task ApplyModelAsync(string path)
     {
         bool ok = await _applyModel!(path);
-        SetStatus(ok ? "Saved — model switched." : "Saved — model switch failed.");
+        // S17: the swap only re-points the app (loading is on demand at the next translation).
+        SetStatus(ok ? "Saved — will use this model from the next translation." : "Saved — model switch failed.");
     }
 
     /// <summary>Writes the hotkey config file that the hotkey layer (S6) reads.</summary>

@@ -10,6 +10,17 @@ public enum HardwareMode
     Auto,
 }
 
+/// <summary>When the loaded model is unloaded after idle time (S17); reload happens on demand at the next translation.</summary>
+public enum ModelUnloadAfter
+{
+    /// <summary>The model is released as soon as each translation finishes.</summary>
+    Immediate,
+    OneMinute,
+    FiveMinutes,
+    /// <summary>No automatic unload — the model stays in memory until Forge exits.</summary>
+    None,
+}
+
 /// <summary>
 /// Forge user settings with JSON persistence.
 ///
@@ -33,8 +44,12 @@ public sealed class ForgeSettings
     /// <summary>Context window size in tokens.</summary>
     public int ContextSize { get; set; } = 8192;
 
-    /// <summary>Seconds of idle time before the loaded model is unloaded (S8); reload happens on demand.</summary>
-    public int IdleUnloadSeconds { get; set; } = 120;
+    /// <summary>
+    /// When the loaded model is unloaded after idle time (S17); reload happens on demand
+    /// at the next translation. Old settings files may carry a leftover "IdleUnloadSeconds"
+    /// key — System.Text.Json ignores unknown properties, so it deserializes to the default.
+    /// </summary>
+    public ModelUnloadAfter UnloadAfter { get; set; } = ModelUnloadAfter.OneMinute;
 
     /// <summary>Hardware selection (CPU / GPU / Auto); resolved by <see cref="HardwareDetector"/> (S8).</summary>
     public HardwareMode Hardware { get; set; } = HardwareMode.Cpu;

@@ -283,6 +283,30 @@
 
 ---
 
+## S17 — 온디맨드 모델 로드 + 언로드 옵션 선택
+
+**날짜:** 2026-11-06 · **상태:** 완료 (수동 검증 대기)
+
+### 완성 내용
+- **시작 시 자동 로드 제거.** 앱 시작과 동시에 모델을 로드시키지 않고, 첫 번역(`RunDirectAsync`) 때 온디맨드 로드한다. 로드 경로는 `LoadModelAsync`로 통일 — 파일이 없으면 첫 실행 온보딩(S10) 다운로드까지 여기서 처리. 트레이는 시작부터 ready 상태("model loads on demand").
+- **idle 언로드가 자유 입력 초 단위에서 고정 4옵션으로 변경** (라디오 버튼, 콤보박스 아님): 즉시 / 1분 / 5분 / 안 함. `ForgeSettings.IdleUnloadSeconds`(int) → `ModelUnloadAfter` enum(`Immediate`/`OneMinute`/`FiveMinutes`/`None`, 기본값 `OneMinute`). "즉시"는 유휴 타이머 없이 번역 완료 직후 모델을 바로 해제한다.
+- **설정 화면의 크래시 덤프 체크박스 제거.** `ForgeSettings.CrashDumpEnabled` 속성은 그대로 유지(기본 false, settings.json에서 opt-in) — UI 노출만 사라짐.
+- **`ArmIdleUnload()`**이 로드 직후·추론 직후마다 현재 설정을 다시 읽고 타이머를 (재)암한다 — 언로드 옵션 변경이 재시작 없이 다음 번역부터 적용. "안 함"이면 타이머를 전혀 암하지 않아 모델이 메모리에 남음.
+- **설정 화면의 모델 선택(핫스왑)이 새 모델을 즉시 로드하지 않음** — 현재 로드된 모델만 해제하고 경로만 재지정. 로드는 다음 번역에서 온디맨드 발생. 상태줄: "Saved — will use this model from the next translation."
+- 구 `settings.json`의 `IdleUnloadSeconds` 키는 무명 속성으로 무시되어 기본값(`OneMinute`)으로 deserialize된다 — 마이그레이션 코드 불필요 (테스트로 고정).
+
+### 검증
+- [x] 단위 테스트: `ForgeSettingsTests` 새 enum + 구 파일 마이그레이션 케이스 갱신. `IdleUnloadManagerTests`는 그대로(manager API 미변경).
+- [ ] 수동 검증: 시작(트레이 즉시 teal, 모델 미로드) → 첫 번역(모델 로드 + 해머 인디케이터) → 1분 유휴 → 언로드 → 두 번째 번역(재로드) → "안 함" 옵션에서 메모리 유지.
+
+### 변경 파일
+- `src/Forge.Core/ForgeSettings.cs` (`ModelUnloadAfter` enum, `UnloadAfter` 속성)
+- `src/Forge.App/App.cs` (시작 로드 제거, 온디맨드 로드, `ArmIdleUnload`, `SwapModelAsync` 즉시 로드 제거)
+- `src/Forge.App/SettingsWindow.cs` (초 단위 텍스트 박스 → 라디오 3개)
+- `tests/Forge.Core.Tests/ForgeSettingsTests.cs`
+
+---
+
 ## 요약
 
 ### 테스트 수 progression
