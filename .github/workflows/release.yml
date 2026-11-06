@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: write
-  releases: write
 
 jobs:
   release:
@@ -41,15 +40,16 @@ jobs:
           }
           & $iscc "/DMyAppVersion=$version" "installer\forge.isn"
 
-      - name: Build portable zip (exe + portable.txt)
+      - name: Build portable zip (exe + Assets + portable.txt)
         shell: pwsh
         run: |
           $version = $env:GITHUB_REF_NAME -replace '^v', ''
           New-Item -ItemType File -Path installer\publish\portable.txt -Force | Out-Null
           New-Item -ItemType Directory -Path dist | Out-Null
-          # The exe is fully self-contained (managed + native libs + assets bundled),
-          # so the zip carries only the exe and the portable marker.
-          Compress-Archive -Path installer\publish\Forge.App.exe, installer\publish\portable.txt `
+          # The .ico/.wav assets are ExcludeFromSingleFile, so they live on disk next to the
+          # exe (AppContext.BaseDirectory) and LoadIcon reads them from there at startup.
+          # They must ship in the zip — a bare exe with no Assets/ folder crashes on launch.
+          Compress-Archive -Path installer\publish\Forge.App.exe, installer\publish\Assets, installer\publish\portable.txt `
             -DestinationPath "dist\Forge-Portable-$version-win-x64.zip"
 
       - name: Publish GitHub release
