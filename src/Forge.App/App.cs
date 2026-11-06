@@ -290,6 +290,13 @@ public partial class App : Application, IOnboardingHost
             ModelState.Ready => "tray_ready.ico",
             _ => "tray_error.ico",
         };
+        // The idle-unload timer ticks on a background thread; the tray icon is UI and may
+        // only be touched from the UI thread (S17 crash: VerifyAccess in TaskbarIcon.set_IconSource).
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.Invoke(() => SetState(state, tooltip));
+            return;
+        }
         _tray?.IconSource = LoadIcon(iconFile);
         _tray?.ToolTipText = tooltip;
     }

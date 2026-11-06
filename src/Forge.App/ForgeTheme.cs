@@ -94,6 +94,9 @@ public static class ForgeTheme
                 new Setter(Controls.Control.PaddingProperty, new Thickness(8, 6, 8, 6)),
                 new Setter(TextBox.CaretBrushProperty, TextBrush),
                 new Setter(TextBox.SelectionBrushProperty, AccentBrush),
+                // null (not an empty ControlTemplate — WPF rejects that at style seal): focused
+                // fields show via their accent border, not the OS dotted rect.
+                new Setter(Controls.Control.FocusVisualStyleProperty, null),
             },
         };
         var focus = new Trigger { Property = Controls.Control.IsKeyboardFocusWithinProperty, Value = true };
@@ -112,6 +115,9 @@ public static class ForgeTheme
                 new Setter(Controls.Control.ForegroundProperty, TextBrush),
                 new Setter(Controls.Control.BorderBrushProperty, BorderBrush),
                 new Setter(Controls.Control.PaddingProperty, new Thickness(14, 7, 14, 7)),
+                // null (not an empty ControlTemplate — WPF rejects that at style seal): focused
+                // buttons show via their accent border, not the OS dotted rect.
+                new Setter(Controls.Control.FocusVisualStyleProperty, null),
             },
         };
         var hover = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
@@ -120,6 +126,9 @@ public static class ForgeTheme
         var pressed = new Trigger { Property = Button.IsPressedProperty, Value = true };
         pressed.Setters.Add(new Setter(Controls.Control.BackgroundProperty, BorderBrush));
         style.Triggers.Add(pressed);
+        var focus = new Trigger { Property = Controls.Control.IsKeyboardFocusWithinProperty, Value = true };
+        focus.Setters.Add(new Setter(Controls.Control.BorderBrushProperty, AccentBrush));
+        style.Triggers.Add(focus);
         return style;
     }
 
