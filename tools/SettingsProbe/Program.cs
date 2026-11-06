@@ -9,10 +9,10 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Forge.App;
 
-// Probe: construct SettingsWindow headlessly, then inspect the themed ComboBox:
-// open its dropdown with many items and read back the RENDERED foreground of item
-// text plus the ScrollViewer's scrollable extent. Verifies both reported bugs
-// (item text invisible; no scrolling) with real values, not guesses.
+// Probe: construct SettingsWindow headlessly, then inspect the model tab: the dropdown
+// is gone (S18), models are clickable cards, and the download section lists catalog
+// models not yet on disk. Verifies card presence, selection highlight, window scroll,
+// hotkey capture logic, and auto-save with real values, not guesses.
 internal static class Program
 {
     [STAThread]
@@ -55,8 +55,15 @@ internal static class Program
             }
         }
 
-        static string BrushName(Brush? b) =>
-            b is SolidColorBrush sb ? $"#{sb.Color.R:X2}{sb.Color.G:X2}{sb.Color.B:X2}" : b?.ToString() ?? "null";
+        static IEnumerable<Button> AllButtons(DependencyObject root)
+        {
+            for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+            {
+                var child = VisualTreeHelper.GetChild(root, i);
+                if (child is Button b2) yield return b2;
+                foreach (var nested in AllButtons(child)) yield return nested;
+            }
+        }
 
         // Awaits on the dispatcher thread pump WPF frames, so layout/render run between steps.
         app.Dispatcher.InvokeAsync(async () =>
@@ -93,94 +100,52 @@ internal static class Program
                 Log($"window scroll test: offset before={offsetBefore:F1} after={winScroll.VerticalOffset:F1}");
                 if (winScroll.VerticalOffset <= 0) throw new Exception("scroll offset did not move");
 
-                var combo = FindVisual<ThemedComboBox>(settings);
-                if (combo is null) throw new Exception("ThemedComboBox not found in visual tree");
-                Log($"found ThemedComboBox, items: {combo.Items.Count}");
+                // --- Model cards (S18): the dropdown is gone; models are clickable cards ---
+                if (FindVisual<ComboBox>(settings) is not null)
+                    throw new Exception("no combobox should remain in settings — models are cards now");
 
-                // Closed-state diagnostics: which template is applied and what does the field render?
-                Log($"combo.Template = {combo.Template?.GetType()}");
-                Log($"combo.Background = {BrushName(combo.Background)} combo.BorderBrush = {BrushName(combo.BorderBrush)}");
-                var closedBorder = FindVisual<Border>(combo);
-                // Walk every border in the closed field to find the one that paints its background.
-                for (var i = 0; i < VisualTreeHelper.GetChildrenCount(combo); i++)
-                    LogBorders(VisualTreeHelper.GetChild(combo, i), 0);
-                void LogBorders(DependencyObject node, int depth)
+                var modelList = typeof(SettingsWindow).GetField("_modelList",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(settings) as StackPanel;
+                if (modelList is null) throw new Exception("_modelList not found");
+                var downloadList = typeof(SettingsWindow).GetField("_downloadList",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(settings) as StackPanel;
+                if (downloadList is null) throw new Exception("_downloadList not found");
+
+                int installedRows = modelList.Children.Count;
+                int downloadButtons = 0;
+                foreach (var child in downloadList.Children)
+                    if (child is Border b)
+                        downloadButtons += AllButtons(b).Where(x => x.Content as string == "Download").Count();
+                Log($"model cards: installed={installedRows} download buttons={downloadButtons}");
+                if (installedRows + downloadButtons < 1)
+                    throw new Exception("at least one model must be visible (installed card or download button)");
+
+                // The selected path must match a row, and that row must carry the accent border.
+                string selectedPath = (string)typeof(SettingsWindow).GetField("_selectedModelPath",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(settings)!;
+                var rows = (System.Collections.IList)typeof(SettingsWindow).GetField("_modelRows",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(settings)!;
+                Border? selectedRow = null;
+                foreach (var item in rows)
                 {
-                    if (node is Border b)
-                        Log(new string(' ', depth * 2) + $"border: bg={BrushName(b.Background)} w={b.ActualWidth:F0} h={b.ActualHeight:F0}");
-                    for (var j = 0; j < VisualTreeHelper.GetChildrenCount(node); j++)
-                        LogBorders(VisualTreeHelper.GetChild(node, j), depth + 1);
+                    var (row, path) = (System.ValueTuple<Border, string>)item;
+                    if (string.Equals(path, selectedPath, StringComparison.OrdinalIgnoreCase)) selectedRow = row;
                 }
+                if (selectedRow is null) throw new Exception("the selected model path has no card");
+                Log($"selected model: {selectedPath}");
+                if (!ReferenceEquals(selectedRow.BorderBrush, ForgeTheme.AccentBrush))
+                    throw new Exception("the selected card should carry the accent border");
+                Log("selected card highlight OK");
 
-                // (Pixel sampling removed: RenderTargetBitmap is unreliable in
-                // headless probe; border background logs above are sufficient.)
-
-                for (var i = 1; i <= 25; i++)
-                    combo.Items.Add($"model-{i:00}-Q8_0.gguf (very long filename to test wrapping)");
-                await Task.Delay(300);
-
-                Log("opening dropdown");
-                // Open via the toggle (default template: Click/IsChecked drives
-                // IsDropDownOpen through the template trigger).
-                var toggle = FindVisual<System.Windows.Controls.Primitives.ToggleButton>(combo);
-                if (toggle is null) throw new Exception("PART_Toggle not found");
-                toggle.IsChecked = true;
-                await Task.Delay(1200);
-
-                var popup = FindVisual<Popup>(combo);
-                if (popup is null) throw new Exception("PART_Popup not found");
-                Log($"IsDropDownOpen={combo.IsDropDownOpen} popup.IsOpen={popup.IsOpen} child={(popup.Child != null)}");
-                if (popup.Child is null) throw new Exception("popup content not attached");
-                Log($"popup open, child type: {popup.Child.GetType().Name}");
-
-                // Keep the dropdown open long enough for an external screenshot.
-                await Task.Delay(300);
-
-                DumpTree(popup.Child, 0);
-
-                // Render the open dropdown to a PNG so it can be inspected visually.
-                var childFe = (FrameworkElement)popup.Child;
-                // Popup content lives in its own HwndSource; render from that source's root
-                // so the capture is valid (rendering across the boundary yields a blank image).
-                var hws = PresentationSource.FromVisual(childFe) as HwndSource;
-                var renderTarget = hws?.RootVisual ?? childFe;
-                var rtb = new RenderTargetBitmap(
-                    (int)childFe.ActualWidth, (int)childFe.ActualHeight, 96, 96, PixelFormats.Pbgra32);
-                rtb.Render(renderTarget);
-                var pngPath = Path.Combine(Path.GetTempPath(), "forge-dropdown.png");
-                var encoder = new PngBitmapEncoder();
-                encoder.Frames.Add(BitmapFrame.Create(rtb));
-                using (var fs = File.Create(pngPath))
-                    encoder.Save(fs);
-                Log($"saved dropdown render: {pngPath}");
-
-                void DumpTree(DependencyObject node, int depth)
-                {
-                    var fe = node as FrameworkElement;
-                    Log(new string(' ', depth * 2) + $"{node.GetType().Name} w={fe?.ActualWidth:F0} h={fe?.ActualHeight:F0}");
-                    for (var i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++)
-                        DumpTree(VisualTreeHelper.GetChild(node, i), depth + 1);
-                }
-
-                var scroll = FindVisual<ScrollViewer>(popup.Child);
-                if (scroll is null) throw new Exception("ScrollViewer not found in popup");
-                Log($"scrollviewer: actualHeight={scroll.ActualHeight:F1} scrollableExtent={scroll.ScrollableHeight:F1} canContentScroll={scroll.CanContentScroll} verticalOffset={scroll.VerticalOffset}");
-
-                // Functional scroll test: request a large offset and verify the viewport moved.
-                var before = scroll.VerticalOffset;
-                scroll.ScrollToVerticalOffset(scroll.ExtentHeight);
-                await Task.Delay(300);
-                Log($"scroll test: offset before={before:F1} after={scroll.VerticalOffset:F1} extent={scroll.ExtentHeight:F1} viewport={scroll.ViewportHeight:F1}");
-
-                var texts = AllTextBlocks(popup.Child).ToList();
-                Log($"textblocks in popup: {texts.Count}");
-                foreach (var t in texts.Take(3))
-                    Log($"  item text '{t.Text[..Math.Min(24, t.Text.Length)]}' foreground={BrushName(TextElement.GetForeground(t))}");
-
-                // Closed-state selected value text (ContentSite) — the popup's child is in a
-                // separate visual tree, so walking the combo only reaches closed-state text.
-                foreach (var t in AllTextBlocks(combo).Take(3))
-                    Log($"  closed-field text '{t.Text[..Math.Min(24, t.Text.Length)]}' foreground={BrushName(TextElement.GetForeground(t))}");
+                // --- Download card construction (S18): build one for the catalog default and
+                // assert its shape (Download + Cancel buttons, name text) without touching disk.
+                var makeDownloadRow = typeof(SettingsWindow).GetMethod("MakeDownloadRow",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+                var downloadCard = (Border)makeDownloadRow.Invoke(settings, new object[] { Forge.Core.ModelManager.DefaultModel })!;
+                int dButtons = AllButtons(downloadCard).Count();
+                if (dButtons != 2) throw new Exception("a download card should have Download + Cancel buttons");
+                var nameText = ((StackPanel)((Grid)((StackPanel)downloadCard.Child).Children[0]).Children[0]).Children[0] as TextBlock;
+                Log($"download card: buttons={dButtons} name='{nameText?.Text}'");
 
                 // --- Hotkey capture field checks ---
                 var popupField = (HotkeyField)typeof(SettingsWindow).GetField("_translateBox",

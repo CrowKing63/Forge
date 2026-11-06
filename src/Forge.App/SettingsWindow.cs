@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows;
@@ -16,8 +17,9 @@ namespace Forge.App;
 ///
 /// Persists to <see cref="ForgeSettings"/> (JSON under %LOCALAPPDATA%\Forge). The hotkey tab
 /// is the source of truth the hotkey layer (S6) reads from; the model tab lists every GGUF
-/// in the models directory (<see cref="ModelManager.DefaultModelsDir"/>) and, when the app
-/// supplies <paramref name="applyModel"/>, hot-swaps the loaded model on save — no restart.
+/// in the models directory (<see cref="ModelManager.DefaultModelsDir"/>) as clickable cards —
+/// no dropdown — and offers to download catalog models that are not on disk yet. When the
+/// app supplies <paramref name="applyModel"/>, selecting a model hot-swaps it — no restart.
 ///
 /// Visuals: Forge's dark theme (<see cref="ForgeTheme"/>), applied via window resources;
 /// each tab is a description line over a card of controls.
@@ -28,7 +30,11 @@ public sealed class SettingsWindow : Window
     private readonly Func<string, Task<bool>>? _applyModel;
     private readonly string _originalModelPath;
 
-    private ComboBox _modelBox = null!;
+    private StackPanel _modelList = null!;
+    private StackPanel _downloadList = null!;
+    private string _selectedModelPath = "";
+    private CancellationTokenSource? _downloadCts;
+    private readonly List<(Border Row, string Path)> _modelRows = new();
     private TextBox _contextBox = null!;
     private RadioButton _unloadImmediateRadio = null!;
     private RadioButton _unloadOneMinRadio = null!;
@@ -43,13 +49,6 @@ public sealed class SettingsWindow : Window
     private UIElement[] _sections = null!;
     private ContentControl _contentHost = null!;
     private bool _loading;
-
-    /// <summary>One dropdown entry: a catalog model plus its file path.</summary>
-    private sealed record ModelChoice(ModelInfo Info, string Path)
-    {
-        public override string ToString() =>
-            string.IsNullOrEmpty(Info.Quantization) ? Info.Name : $"{Info.Name} ({Info.Quantization})";
-    }
 
     /// <param name="applyModel">
     /// Optional hot-swap hook: invoked with the new model path when the user saves a
@@ -86,8 +85,10 @@ public sealed class SettingsWindow : Window
 
     protected override void OnClosing(CancelEventArgs e)
     {
-        // Persist any last edit (e.g. a focused field that never lost focus) before the
-        // window goes away; closing does not quit the app — it lives on in the tray.
+        // Stop any in-flight download (the .part file stays; it resumes later) and persist
+        // any last edit (e.g. a focused field that never lost focus) before the window goes
+        // away; closing does not quit the app — it lives on in the tray.
+        _downloadCts?.Cancel();
         TryAutoSave();
         base.OnClosing(e);
     }
@@ -202,13 +203,18 @@ public sealed class SettingsWindow : Window
     {
         var panel = new StackPanel();
 
-        // S9: the models dropdown lists every GGUF in the models directory. No manual
-        // path entry — dropping a file into the folder makes it appear here.
-        _modelBox = new ThemedComboBox { Margin = new Thickness(0, 4, 0, 0) };
-        _modelBox.SelectionChanged += (_, _) => TryAutoSave();
+        // S18: models are clickable cards, not a dropdown. Every GGUF in the models
+        // directory is detected and listed; clicking one selects it (auto-save + hot-swap).
+        // No manual path entry — dropping a file into the folder makes it appear here.
         panel.Children.Add(MakeLabel("Model"));
-        panel.Children.Add(_modelBox);
-        panel.Children.Add(MakeHint("Drop .gguf files into the models folder to add them; pick one here."));
+        _modelList = new StackPanel();
+        panel.Children.Add(_modelList);
+        panel.Children.Add(MakeHint("Drop .gguf files into the models folder to add them; click one to select it."));
+
+        // S18: download section — catalog models not yet on disk.
+        panel.Children.Add(MakeSectionLabel("Download"));
+        _downloadList = new StackPanel();
+        panel.Children.Add(_downloadList);
 
         return MakeCard(panel);
     }
@@ -279,6 +285,179 @@ public sealed class SettingsWindow : Window
         return MakeCard(panel);
     }
 
+    /// <summary>Rebuilds the installed-model cards and the download section from disk.</summary>
+    private void RebuildModelLists()
+    {
+        var manager = new ModelManager(ModelManager.DefaultModelsDir);
+
+        _modelList.Children.Clear();
+        _modelRows.Clear();
+        foreach (var m in manager.ListModels().Where(manager.IsDownloaded))
+        {
+            string sub = string.IsNullOrEmpty(m.Quantization)
+                ? ""
+                : $"{m.Quantization} · {m.SizeBytes / 1024 / 1024} MB";
+            _modelList.Children.Add(MakeModelRow(m.Name, sub, manager.GetPath(m)));
+        }
+
+        // If the configured path is outside the directory (e.g. a custom location), keep it
+        // selectable so saving doesn't silently switch models.
+        if (_modelRows.All(r => !string.Equals(r.Path, _selectedModelPath, StringComparison.OrdinalIgnoreCase)))
+            _modelList.Children.Add(MakeModelRow(Path.GetFileNameWithoutExtension(_settings.ModelPath), "", _settings.ModelPath));
+
+        UpdateModelSelection();
+
+        _downloadList.Children.Clear();
+        var downloadable = manager.ListModels()
+            .Where(m => m.DownloadUrl.Length > 0 && !manager.IsDownloaded(m))
+            .ToList();
+        if (downloadable.Count == 0)
+            _downloadList.Children.Add(MakeHint("All available models are installed."));
+        else
+            foreach (var m in downloadable)
+                _downloadList.Children.Add(MakeDownloadRow(m));
+    }
+
+    /// <summary>A clickable model card: name over quantization/size; accent border when selected.</summary>
+    private Border MakeModelRow(string name, string sub, string path)
+    {
+        var text = new StackPanel();
+        text.Children.Add(new TextBlock { Text = name, FontWeight = FontWeights.SemiBold });
+        if (sub.Length > 0)
+            text.Children.Add(new TextBlock
+            {
+                Text = sub,
+                Foreground = ForgeTheme.MutedBrush,
+                FontSize = 12,
+                Margin = new Thickness(0, 2, 0, 0),
+            });
+
+        var row = new Border
+        {
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(12, 8, 12, 8),
+            Margin = new Thickness(0, 3, 0, 3),
+            Background = Brushes.Transparent,
+            Child = text,
+        };
+        row.MouseEnter += (_, _) =>
+        {
+            if (row.Background == Brushes.Transparent) row.Background = ForgeTheme.HoverFieldBrush;
+        };
+        row.MouseLeave += (_, _) =>
+        {
+            if (row.Background != ForgeTheme.FieldBrush) row.Background = Brushes.Transparent;
+        };
+        row.MouseLeftButtonUp += (_, _) => SelectModel(path);
+        _modelRows.Add((row, path));
+        return row;
+    }
+
+    /// <summary>A download card: name + size with a Download button and progress bar.</summary>
+    private Border MakeDownloadRow(ModelInfo model)
+    {
+        var info = new StackPanel();
+        info.Children.Add(new TextBlock { Text = model.Name, FontWeight = FontWeights.SemiBold });
+        info.Children.Add(MakeHint($"{model.SizeBytes / 1024 / 1024} MB"));
+
+        var download = new Button { Content = "Download", MinWidth = 90 };
+        var cancel = new Button { Content = "Cancel", MinWidth = 80, Visibility = Visibility.Collapsed, Margin = new Thickness(8, 0, 0, 0) };
+        var actions = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        actions.Children.Add(download);
+        actions.Children.Add(cancel);
+
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.Children.Add(info);
+        Grid.SetColumn(actions, 1);
+        grid.Children.Add(actions);
+
+        var bar = new ProgressBar { Height = 6, Margin = new Thickness(0, 10, 0, 0), Visibility = Visibility.Collapsed };
+
+        var card = new StackPanel();
+        card.Children.Add(grid);
+        card.Children.Add(bar);
+
+        var border = new Border
+        {
+            CornerRadius = new CornerRadius(8),
+            Background = ForgeTheme.FieldBrush,
+            Padding = new Thickness(12, 10, 12, 10),
+            Margin = new Thickness(0, 3, 0, 3),
+            Child = card,
+        };
+
+        cancel.Click += (_, _) => _downloadCts?.Cancel();
+        download.Click += async (_, _) =>
+        {
+            download.IsEnabled = false;
+            cancel.Visibility = Visibility.Visible;
+            bar.Visibility = Visibility.Visible;
+            _downloadCts = new CancellationTokenSource();
+            var manager = new ModelManager(ModelManager.DefaultModelsDir);
+            try
+            {
+                await manager.DownloadAsync(
+                    model,
+                    progress: new Progress<DownloadProgress>(p => Dispatcher.Invoke(() => OnDownloadProgress(bar, p))),
+                    _downloadCts.Token);
+                SetStatus($"Download complete: {model.Name}.");
+                RebuildModelLists();
+            }
+            catch (OperationCanceledException)
+            {
+                SetStatus("Download cancelled — the partial file is kept; it resumes next time.");
+            }
+            catch (Exception ex)
+            {
+                SetStatus($"Download failed: {ex.Message}");
+            }
+            finally
+            {
+                _downloadCts = null;
+                download.IsEnabled = true;
+                cancel.Visibility = Visibility.Collapsed;
+                bar.Visibility = Visibility.Collapsed;
+            }
+        };
+
+        return border;
+    }
+
+    /// <summary>Updates the accent highlight on the selected model card.</summary>
+    private void UpdateModelSelection()
+    {
+        foreach (var (row, path) in _modelRows)
+        {
+            bool selected = string.Equals(path, _selectedModelPath, StringComparison.OrdinalIgnoreCase);
+            row.Background = selected ? ForgeTheme.FieldBrush : Brushes.Transparent;
+            row.BorderBrush = selected ? ForgeTheme.AccentBrush : null;
+            row.BorderThickness = selected ? new Thickness(1) : new Thickness(0);
+        }
+    }
+
+    /// <summary>Selects a model card: updates the highlight and auto-saves (hot-swap).</summary>
+    private void SelectModel(string path)
+    {
+        if (string.Equals(path, _selectedModelPath, StringComparison.OrdinalIgnoreCase)) return;
+        _selectedModelPath = path;
+        UpdateModelSelection();
+        TryAutoSave();
+    }
+
+    /// <summary>Maps download progress onto a card's progress bar.</summary>
+    private static void OnDownloadProgress(ProgressBar bar, DownloadProgress p)
+    {
+        bar.IsIndeterminate = p.TotalBytes <= 0;
+        bar.Value = Math.Clamp(p.Fraction * 100, 0, 100);
+    }
+
     /// <summary>A card: the subtle surface every section's controls sit on.</summary>
     private static Border MakeCard(UIElement content) => new()
     {
@@ -318,24 +497,10 @@ public sealed class SettingsWindow : Window
 
     private void PopulateFromSettings()
     {
-        // S9: list every GGUF in the models directory; select the currently configured one.
-        var manager = new ModelManager(ModelManager.DefaultModelsDir);
-        foreach (var m in manager.ListModels())
-            _modelBox.Items.Add(new ModelChoice(m, manager.GetPath(m)));
-
-        // If the configured path is outside the directory (e.g. a custom location), keep it
-        // selectable so saving doesn't silently switch models.
-        string current = _settings.ModelPath;
-        if (_modelBox.Items.Cast<ModelChoice>().All(c => c.Path != current))
-        {
-            var fileName = Path.GetFileNameWithoutExtension(current);
-            _modelBox.Items.Add(new ModelChoice(
-                new ModelInfo(fileName, fileName, "", 0, "", ""),
-                current));
-        }
-
-        var selected = _modelBox.Items.Cast<ModelChoice>().FirstOrDefault(c => c.Path == current);
-        _modelBox.SelectedItem = selected ?? _modelBox.Items.Cast<ModelChoice>().First();
+        // S18: build the model cards (installed models + download section) and mark the
+        // currently configured one as selected.
+        _selectedModelPath = _settings.ModelPath;
+        RebuildModelLists();
 
         _contextBox.Text = _settings.ContextSize.ToString();
         _unloadImmediateRadio.IsChecked = _settings.UnloadAfter == ModelUnloadAfter.Immediate;
@@ -364,8 +529,7 @@ public sealed class SettingsWindow : Window
             return;
         }
 
-        var choice = _modelBox.SelectedItem as ModelChoice;
-        string newModelPath = choice?.Path ?? "";
+        string newModelPath = _selectedModelPath;
         bool modelChanged = newModelPath != _originalModelPath;
 
         _settings.ModelPath = newModelPath;

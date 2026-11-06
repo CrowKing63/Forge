@@ -1,6 +1,5 @@
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using Controls = System.Windows.Controls;
@@ -35,10 +34,6 @@ public static class ForgeTheme
         resources.Add(typeof(TextBlock), TextBlockStyle());
         resources.Add("HintText", HintTextStyle());
         resources.Add(typeof(TextBox), TextBoxStyle());
-        // Keyed by the exact runtime type: WPF implicit styles do not walk the type
-        // hierarchy, so a typeof(ComboBox) key would never match ThemedComboBox.
-        resources.Add(typeof(ThemedComboBox), ComboBoxStyle());
-        resources.Add(typeof(ComboBoxItem), ComboBoxItemStyle());
         resources.Add(typeof(CheckBox), CheckBoxStyle());
         resources.Add(typeof(RadioButton), RadioButtonStyle());
         resources.Add(typeof(Button), ButtonStyle());
@@ -232,140 +227,5 @@ public static class ForgeTheme
         };
     }
 
-    private static Style ComboBoxStyle()
-    {
-        // Color-only style: no Template setter. WPF only attaches its dropdown
-        // infrastructure (chrome > Border > ScrollViewer > ItemsPresenter) to the
-        // default template's PART_Popup; an FEF-built popup is never recognized, so a
-        // custom template leaves the list unable to render or scroll. The default
-        // template is themed in place via ThemedComboBox.OnApplyTemplate.
-        return new Style(typeof(ThemedComboBox))
-        {
-            Setters =
-            {
-                new Setter(Controls.Control.BackgroundProperty, FieldBrush),
-                new Setter(Controls.Control.ForegroundProperty, TextBrush),
-                new Setter(Controls.Control.BorderBrushProperty, BorderBrush),
-                new Setter(ItemsControl.ItemContainerStyleProperty, ComboBoxItemStyle()),
-            },
-        };
-    }
-
-    private static Style ComboBoxItemStyle()
-    {
-        var label = new FrameworkElementFactory(typeof(ContentPresenter));
-        label.SetValue(FrameworkElement.MarginProperty, new Thickness(8, 6, 8, 6));
-
-        var border = new FrameworkElementFactory(typeof(Border));
-        border.SetValue(Border.CornerRadiusProperty, new CornerRadius(4));
-        border.SetValue(Controls.Control.BackgroundProperty, Brushes.Transparent);
-        border.AppendChild(label);
-
-        var style = new Style(typeof(ComboBoxItem))
-        {
-            Setters =
-            {
-                new Setter(Controls.Control.ForegroundProperty, TextBrush),
-                new Setter(Controls.Control.TemplateProperty, new ControlTemplate(typeof(ComboBoxItem)) { VisualTree = border }),
-            },
-        };
-        var highlighted = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
-        highlighted.Setters.Add(new Setter(Controls.Control.BackgroundProperty, HoverFieldBrush));
-        style.Triggers.Add(highlighted);
-        var selected = new Trigger { Property = Controls.ListBoxItem.IsSelectedProperty, Value = true };
-        selected.Setters.Add(new Setter(Controls.Control.BackgroundProperty, BorderBrush));
-        style.Triggers.Add(selected);
-        return style;
-    }
 }
 
-/// <summary>
-/// ComboBox themed on top of the default template: the style only sets colors, so
-/// WPF's dropdown infrastructure (chrome > Border > ScrollViewer > ItemsPresenter)
-/// stays intact and is re-sketched in place when the popup opens.
-/// </summary>
-public sealed class ThemedComboBox : Controls.ComboBox
-{
-    public ThemedComboBox()
-    {
-        // The default template's field Border is TemplateBinding-driven, so pinning
-        // the brushes here themes the closed-state field even if the style's color
-        // setters fail to apply.
-        Background = ForgeTheme.FieldBrush;
-        Foreground = ForgeTheme.TextBrush;
-        BorderBrush = ForgeTheme.BorderBrush;
-    }
-
-    public override void OnApplyTemplate()
-    {
-        base.OnApplyTemplate();
-
-        // The default template's editable-text Border is hardcoded to
-        // SystemColors.WindowBrushKey (white) and covers the whole closed-state
-        // field, hiding the dark toggle button behind it. Make it transparent.
-        if (GetTemplateChild("border") is Border border)
-            border.Background = Brushes.Transparent;
-
-        // The toggle button's border uses a hardcoded theme gradient
-        // (LinearGradientBrush) that ignores our Background setter. Replace it
-        // after layout so the visual tree exists.
-        Dispatcher.BeginInvoke(new Action(() =>
-        {
-            foreach (var b in EnumerateBorders(this))
-                if (b.Background is LinearGradientBrush)
-                    b.Background = ForgeTheme.FieldBrush;
-        }), System.Windows.Threading.DispatcherPriority.Loaded);
-
-        if (GetTemplateChild("PART_Popup") is not Popup popup) return;
-
-        // WPF builds the dropdown infrastructure (drop-shadow chrome > Border >
-        // ScrollViewer > ItemsPresenter) lazily when the popup opens, and the
-        // scroll viewer only exists after layout — so theme at Loaded priority.
-        // The popup's content lives in a separate visual tree (its own HwndSource),
-        // so the walk must start at popup.Child, not at the Popup element itself.
-        popup.Opened += (_, _) =>
-        {
-            popup.Dispatcher.BeginInvoke(new Action(() =>
-            {
-                if (popup.Child is not DependencyObject root) return;
-                var border = FindVisual<Border>(root);
-                if (border is not null)
-                {
-                    border.Background = ForgeTheme.CardBrush;
-                    border.BorderBrush = ForgeTheme.BorderBrush;
-                    border.MaxHeight = 300;
-                }
-                var scroll = FindVisual<ScrollViewer>(root);
-                if (scroll is not null)
-                {
-                    scroll.Background = Brushes.Transparent;
-                    // Pixel scrolling: with a non-virtualizing StackPanel host, WPF's default
-                    // item-based mode clamps the list to the viewport and breaks scrolling.
-                    scroll.CanContentScroll = false;
-                }
-            }), System.Windows.Threading.DispatcherPriority.Loaded);
-        };
-    }
-
-    private static T? FindVisual<T>(DependencyObject root) where T : DependencyObject
-    {
-        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
-        {
-            var child = VisualTreeHelper.GetChild(root, i);
-            if (child is T t) return t;
-            var found = FindVisual<T>(child);
-            if (found is not null) return found;
-        }
-        return null;
-    }
-
-    private static IEnumerable<Border> EnumerateBorders(DependencyObject root)
-    {
-        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
-        {
-            var child = VisualTreeHelper.GetChild(root, i);
-            if (child is Border b) yield return b;
-            foreach (var nested in EnumerateBorders(child)) yield return nested;
-        }
-    }
-}
