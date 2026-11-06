@@ -45,6 +45,16 @@ public static class HotkeyConfig
         return DefaultTranslateBinding;
     }
 
+    /// <summary>Writes the translate binding to the config file (S20: saved from the wizard).</summary>
+    public static void Save(string binding)
+    {
+        var payload = new { translate = binding };
+        var dir = Path.GetDirectoryName(ConfigPath);
+        if (dir is not null)
+            Directory.CreateDirectory(dir);
+        File.WriteAllText(ConfigPath, JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+    }
+
     /// <summary>The hotkey id used when registering the translate binding.</summary>
     public const int TranslateId = 1;
 

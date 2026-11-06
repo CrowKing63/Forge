@@ -60,6 +60,18 @@ public sealed class ForgeSettings
     /// </summary>
     public bool CrashDumpEnabled { get; set; } = false;
 
+    /// <summary>
+    /// True once the first-run onboarding wizard (S20) has been completed. Old settings files
+    /// lack the key and deserialize to false, so they show the wizard once.
+    /// </summary>
+    public bool OnboardingCompleted { get; set; } = false;
+
+    /// <summary>
+    /// Start Forge when the user signs in to Windows (S20). Mirrors the HKCU Run registry key
+    /// that <c>AutoStartManager</c> writes; settings.json is the record, the registry is the mechanism.
+    /// </summary>
+    public bool AutoStart { get; set; } = false;
+
     /// <summary>%LOCALAPPDATA%\Forge\settings.json</summary>
     public static string DefaultConfigPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Forge", "settings.json");

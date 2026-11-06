@@ -25,7 +25,7 @@ public enum ModelState
 /// Feedback is three isolated modules — HammerIndicator (working indicator), ForgeSounds
 /// (clang), SelectionReplacer (in-place replace). No overlay window, no result editor.
 /// </summary>
-public partial class App : Application
+public partial class App : Application, IOnboardingHost
 {
     private ForgeSettings _settings = new();
     private string _modelPath = "";
@@ -39,6 +39,10 @@ public partial class App : Application
     private ProcessingGuard _guard = new();
     private IntPtr _sourceWindow;
     private System.Windows.Automation.AutomationElement? _sourceElement;
+
+    // S20: background model download owned by the app (started from the onboarding wizard).
+    private Task? _modelDownload;
+    private System.Threading.CancellationTokenSource? _downloadCts;
 
     [STAThread]
     public static void Main()
@@ -80,6 +84,10 @@ public partial class App : Application
 
         SetupHotkeys();
         StartIdleTimer();
+
+        // S20: first-run onboarding wizard (welcome, model download, hotkey, auto-start).
+        if (!e.Args.Contains("--smoke-crash") && !_settings.OnboardingCompleted)
+            ShowOnboardingWizard();
 
         if (e.Args.Contains("--smoke-crash"))
             _ = SmokeCrashAsync(); // S12 smoke hook: exercises the global handler + crash dump
@@ -145,27 +153,29 @@ public partial class App : Application
         DebugLog.Write("direct translate started");
         SetState(ModelState.Loading, "Forge: translating…");
 
-        // Working indicator over the selection (isolated module). Skipped when the
-        // source element's screen rectangle can't be resolved.
-        var indicator = HammerIndicator.Show(_sourceElement);
-
-        // S17 on-demand load: the model is not loaded at startup — it loads here, on the
-        // first translation (and again after an idle unload). LoadModelAsync also runs the
-        // first-run onboarding download when the file is missing.
-        if (!engine.IsLoaded)
-        {
-            DebugLog.Write("direct translate: model load started");
-            if (!await LoadModelAsync(_modelPath))
-            {
-                MessageBox.Show("Model failed to load — open Settings to check the model.",
-                    "Forge", MessageBoxButton.OK, MessageBoxImage.Error);
-                return;
-            }
-            DebugLog.Write("direct translate: model loaded");
-        }
-
+        HammerIndicator? indicator = null;
         try
         {
+            // S17 on-demand load: the model is not loaded at startup — it loads here, on the
+            // first translation (and again after an idle unload). LoadModelAsync also runs the
+            // first-run onboarding download when the file is missing.
+            if (!engine.IsLoaded)
+            {
+                DebugLog.Write("direct translate: model load started");
+                if (!await LoadModelAsync(_modelPath))
+                {
+                    // A missing file means the user cancelled onboarding — no error dialog.
+                    if (File.Exists(_modelPath))
+                        MessageBox.Show("Model failed to load — open Settings to check the model.",
+                            "Forge", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+                DebugLog.Write("direct translate: model loaded");
+            }
+
+            // Working indicator over the selection (isolated module). Shown only once the
+            // model is loaded and about to process — never during onboarding or load failure.
+            indicator = HammerIndicator.Show(_sourceElement);
             // 1. Capture: read the selection directly via UIA (no keystrokes needed).
             //    Falls back to Ctrl+C if UIA can't read it.
             DebugLog.Write("direct translate: capture started");
@@ -299,6 +309,10 @@ public partial class App : Application
         if (!File.Exists(modelPath))
             await ShowOnboardingAsync(modelPath);
 
+        // The user cancelled or skipped onboarding — no file to load, no error.
+        if (!File.Exists(modelPath))
+            return false;
+
         try
         {
             await Task.Run(() => _engine!.LoadModel(modelPath));
@@ -332,6 +346,98 @@ public partial class App : Application
     {
         new SettingsWindow(SwapModelAsync).Show();
     }
+
+    // ---- S20: onboarding wizard host (IOnboardingHost) ----
+
+    public void ShowOnboardingWizard() => new OnboardingWizardWindow(this).Show();
+
+    public string ModelPath => _modelPath;
+
+    public bool IsModelDownloadRunning => _modelDownload is not null;
+
+    /// <summary>Raised on the UI thread as the background download progresses.</summary>
+    public event Action<DownloadProgress>? DownloadProgress;
+
+    /// <summary>Raised on the UI thread when the background download ends.</summary>
+    public event Action<ModelDownloadOutcome>? DownloadFinished;
+
+    public void StartModelDownload()
+    {
+        if (_modelDownload is not null)
+            return;
+
+        var manager = new ModelManager(ModelManager.DefaultModelsDir);
+        var model = manager.ListModels().FirstOrDefault(m =>
+            string.Equals(Path.GetFullPath(manager.GetPath(m)), Path.GetFullPath(_modelPath), StringComparison.OrdinalIgnoreCase));
+        if (model is null || string.IsNullOrEmpty(model.DownloadUrl) || manager.IsDownloaded(model))
+            return;
+
+        _downloadCts = new System.Threading.CancellationTokenSource();
+        DebugLog.Write($"model download started: {model.Name}");
+        _modelDownload = RunModelDownloadAsync(manager, model);
+    }
+
+    public void CancelModelDownload() => _downloadCts?.Cancel();
+
+    private async Task RunModelDownloadAsync(ModelManager manager, ModelInfo model)
+    {
+        try
+        {
+            await manager.DownloadAsync(model,
+                progress: new Progress<DownloadProgress>(p => DownloadProgress?.Invoke(p)),
+                _downloadCts!.Token);
+            DebugLog.Write($"model download complete: {model.Name}");
+            DownloadFinished?.Invoke(ModelDownloadOutcome.Completed);
+        }
+        catch (OperationCanceledException)
+        {
+            DebugLog.Write("model download cancelled — partial file kept for resume");
+            DownloadFinished?.Invoke(ModelDownloadOutcome.Cancelled);
+        }
+        catch (Exception ex)
+        {
+            DebugLog.Write($"model download failed: {ex}");
+            DownloadFinished?.Invoke(ModelDownloadOutcome.Failed);
+        }
+        finally
+        {
+            _modelDownload = null;
+            _downloadCts = null;
+        }
+    }
+
+    /// <summary>Saves the binding and re-registers the global hotkey. Returns false when unparseable or in use.</summary>
+    public bool ApplyHotkey(string binding)
+    {
+        if (!HotkeyConfig.TryParse(binding, out var modifiers, out var key))
+            return false;
+        HotkeyConfig.Save(binding);
+        _hotkeys!.UnregisterAll();
+        bool ok = _hotkeys.Register(HotkeyConfig.TranslateId, modifiers, key);
+        DebugLog.Write(ok ? $"hotkey re-registered: {binding}" : $"hotkey '{binding}' is already in use by another app");
+        return ok;
+    }
+
+    public bool IsAutoStartEnabled => AutoStartManager.IsEnabled();
+
+    public void SetAutoStart(bool enabled)
+    {
+        AutoStartManager.SetEnabled(enabled);
+        var settings = ForgeSettings.Load(); // fresh — _settings is the startup snapshot
+        settings.AutoStart = enabled;
+        settings.Save();
+        DebugLog.Write($"auto-start {(enabled ? "enabled" : "disabled")}");
+    }
+
+    public void FinishOnboarding()
+    {
+        var settings = ForgeSettings.Load();
+        settings.OnboardingCompleted = true;
+        settings.Save();
+        DebugLog.Write("onboarding completed");
+    }
+
+    public void OpenSettingsWindow() => new SettingsWindow(SwapModelAsync).Show();
 
     /// <summary>
     /// Hot-swaps the configured model without a restart (S9): releases the currently loaded

@@ -1,6 +1,8 @@
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Interop;
 using System.Windows.Media;
 using Forge.Core;
 
@@ -38,7 +40,21 @@ public sealed class OnboardingWindow : Window
         Width = 460;
         Height = 230;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        // S20: same dark theme as the settings window and the onboarding wizard.
+        Background = ForgeTheme.BackgroundBrush;
+        Foreground = ForgeTheme.TextBrush;
+        FontFamily = new FontFamily("Segoe UI");
+        FontSize = 13;
+        Resources = ForgeTheme.Build();
         BuildLayout();
+    }
+
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        // Dark title bar on Windows 11 (and Win10 2000+); a harmless no-op elsewhere.
+        int useDark = 1;
+        DwmSetWindowAttribute(new WindowInteropHelper(this).Handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref useDark, sizeof(int));
     }
 
     /// <summary>
@@ -188,7 +204,7 @@ public sealed class OnboardingWindow : Window
 
         _status = new TextBlock
         {
-            Foreground = Brushes.DimGray,
+            Foreground = ForgeTheme.MutedBrush,
             Margin = new Thickness(0, 0, 0, 12),
             TextWrapping = TextWrapping.Wrap,
         };
@@ -203,15 +219,14 @@ public sealed class OnboardingWindow : Window
         _downloadButton = new Button
         {
             Content = "Download",
-            Padding = new Thickness(12, 4, 12, 4),
             MinWidth = 90,
             Margin = new Thickness(8, 0, 0, 0),
+            Style = (Style)Resources["AccentButton"],
         };
         _downloadButton.Click += OnDownloadClicked;
         _cancelButton = new Button
         {
             Content = "Cancel",
-            Padding = new Thickness(12, 4, 12, 4),
             MinWidth = 90,
         };
         _cancelButton.Click += OnCancelClicked;
@@ -225,4 +240,9 @@ public sealed class OnboardingWindow : Window
     }
 
     private void SetStatus(string text) => _status.Text = text;
+
+    private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 }

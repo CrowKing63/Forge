@@ -78,9 +78,23 @@ internal static class Program
                 // --- Sidebar layout check (Handy pattern) ---
                 var sidebar = (settings.Content as Grid)?.Children[0] as Border;
                 if (sidebar is null) throw new Exception("sidebar not found");
-                var navTexts = AllTextBlocks(sidebar).Where(t => t.Text is "Model" or "Engine" or "Hardware" or "Hotkeys").ToList();
+                var navTexts = AllTextBlocks(sidebar).Where(t => t.Text is "Model" or "Engine" or "Hardware" or "Hotkeys" or "General").ToList();
                 Log($"nav items found: {navTexts.Count}");
-                if (navTexts.Count != 4) throw new Exception("expected 4 sidebar nav items");
+                if (navTexts.Count != 5) throw new Exception("expected 5 sidebar nav items");
+
+                // --- General section (S20): auto-start checkbox + onboarding re-run button ---
+                typeof(SettingsWindow).GetMethod("SelectSection",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                    .Invoke(settings, new object[] { 4 });
+                await Task.Delay(300);
+                var generalCheck = FindVisual<CheckBox>(settings);
+                if (generalCheck is null) throw new Exception("auto-start checkbox not found in General");
+                var onboardingButton = AllButtons(settings).FirstOrDefault(b => (b.Content as string) == "Show onboarding again");
+                if (onboardingButton is null) throw new Exception("'Show onboarding again' button not found in General");
+                Log("general section OK");
+                typeof(SettingsWindow).GetMethod("SelectSection",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                    .Invoke(settings, new object[] { 0 });
 
                 // The window's ScrollViewer is a ContentControl subclass, so this finds it;
                 // its .Content is our section host.

@@ -44,6 +44,7 @@ public sealed class SettingsWindow : Window
     private RadioButton _gpuRadio = null!;
     private RadioButton _autoRadio = null!;
     private HotkeyField _translateBox = null!;
+    private CheckBox _autoStartCheck = null!;
     private TextBlock _status = null!;
     private Border[] _navItems = null!;
     private UIElement[] _sections = null!;
@@ -109,15 +110,16 @@ public sealed class SettingsWindow : Window
         };
         Grid.SetColumn(sidebar, 0);
 
-        string[] names = { "Model", "Engine", "Hardware", "Hotkeys" };
-        _sections = new UIElement[4]
+        string[] names = { "Model", "Engine", "Hardware", "Hotkeys", "General" };
+        _sections = new UIElement[5]
         {
             MakeModelSection(),
             MakeEngineSection(),
             MakeHardwareSection(),
             MakeHotkeysSection(),
+            MakeGeneralSection(),
         };
-        _navItems = new Border[4];
+        _navItems = new Border[5];
 
         var nav = new StackPanel();
         for (int i = 0; i < names.Length; i++)
@@ -281,6 +283,27 @@ public sealed class SettingsWindow : Window
         _translateBox.ValueChanged += (_, _) => TryAutoSave();
         panel.Children.Add(MakeLabel("Translate"));
         panel.Children.Add(_translateBox);
+
+        return MakeCard(panel);
+    }
+
+    /// <summary>General (S20): auto-start at sign-in, and a way to re-run the onboarding wizard.</summary>
+    private UIElement MakeGeneralSection()
+    {
+        var panel = new StackPanel();
+        _autoStartCheck = new CheckBox
+        {
+            Content = "Start Forge when I sign in to Windows",
+            Margin = new Thickness(0, 4, 0, 12),
+        };
+        _autoStartCheck.Checked += (_, _) => TryAutoSave();
+        _autoStartCheck.Unchecked += (_, _) => TryAutoSave();
+        panel.Children.Add(_autoStartCheck);
+
+        var onboardingButton = new Button { Content = "Show onboarding again", MinWidth = 160, HorizontalAlignment = HorizontalAlignment.Left };
+        onboardingButton.Click += (_, _) => ((App)Application.Current).ShowOnboardingWizard();
+        panel.Children.Add(MakeSectionLabel("Onboarding"));
+        panel.Children.Add(onboardingButton);
 
         return MakeCard(panel);
     }
@@ -514,6 +537,9 @@ public sealed class SettingsWindow : Window
 
         // Hotkeys come from the config file the hotkey layer (S6) reads.
         _translateBox.Text = HotkeyConfig.Load();
+
+        // S20: auto-start reflects the Run key's current state.
+        _autoStartCheck.IsChecked = AutoStartManager.IsEnabled();
     }
 
     /// <summary>
@@ -551,6 +577,9 @@ public sealed class SettingsWindow : Window
 
         try
         {
+            // S20: keep the auto-start setting and the Run key in sync on every save.
+            _settings.AutoStart = _autoStartCheck.IsChecked == true;
+            AutoStartManager.SetEnabled(_settings.AutoStart);
             _settings.Save();
             SaveHotkeys(translate);
             if (modelChanged && _applyModel is not null)
