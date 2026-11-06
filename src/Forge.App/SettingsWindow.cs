@@ -62,13 +62,13 @@ public sealed class SettingsWindow : Window
         _applyModel = applyModel;
         _originalModelPath = _settings.ModelPath;
         Title = "Forge Settings";
-        Width = 720;
-        Height = 640;
+        Width = 640;
+        Height = 480;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         Background = ForgeTheme.BackgroundBrush;
         Foreground = ForgeTheme.TextBrush;
-        FontFamily = new FontFamily("Segoe UI");
-        FontSize = 13;
+        FontFamily = ForgeTheme.ThemeFont;
+        FontSize = 14;
         Resources = ForgeTheme.Build();
         BuildLayout();
         _loading = true;

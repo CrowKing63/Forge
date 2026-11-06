@@ -52,8 +52,8 @@ public sealed class OnboardingWizardWindow : Window
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         Background = ForgeTheme.BackgroundBrush;
         Foreground = ForgeTheme.TextBrush;
-        FontFamily = new FontFamily("Segoe UI");
-        FontSize = 13;
+        FontFamily = ForgeTheme.ThemeFont;
+        FontSize = 14;
         Resources = ForgeTheme.Build();
 
         BuildLayout();
@@ -256,7 +256,7 @@ public sealed class OnboardingWizardWindow : Window
     {
         var panel = new StackPanel();
         panel.Children.Add(MakeHeading("Welcome to Forge"));
-        panel.Children.Add(MakeHint(
+        panel.Children.Add(MakeBody(
             "Forge translates the text you select, right where it sits. Select some text in any app, press Ctrl+E, and the selection is replaced with its English translation — running entirely on your own machine."));
         return MakeCard(panel);
     }
@@ -265,7 +265,7 @@ public sealed class OnboardingWizardWindow : Window
     {
         var panel = new StackPanel();
         panel.Children.Add(MakeHeading("Model"));
-        _modelStatus = MakeHint("");
+        _modelStatus = MakeBody("");
         panel.Children.Add(_modelStatus);
         _modelBar = new ProgressBar
         {
@@ -315,7 +315,7 @@ public sealed class OnboardingWizardWindow : Window
     {
         var panel = new StackPanel();
         panel.Children.Add(MakeHeading("Translate hotkey"));
-        panel.Children.Add(MakeHint(
+        panel.Children.Add(MakeBody(
             "Click the field, then press the key combination (e.g. Ctrl+E). Press Esc while recording to clear it."));
         panel.Children.Add(MakeLabel("Translate"));
         _hotkeyField = new HotkeyField { Margin = new Thickness(0, 4, 0, 8), Width = 180 };
@@ -334,7 +334,7 @@ public sealed class OnboardingWizardWindow : Window
             Margin = new Thickness(0, 4, 0, 8),
         };
         panel.Children.Add(_autoStartCheck);
-        panel.Children.Add(MakeHint("Forge launches in the background (tray) automatically after you sign in."));
+        panel.Children.Add(MakeBody("Forge launches in the background (tray) automatically after you sign in."));
         return MakeCard(panel);
     }
 
@@ -361,6 +361,13 @@ public sealed class OnboardingWizardWindow : Window
         Text = text,
         FontWeight = FontWeights.SemiBold,
         Margin = new Thickness(0, 2, 0, 4),
+    };
+
+    private TextBlock MakeBody(string text) => new()
+    {
+        Text = text,
+        Style = (Style)Resources["BodyText"],
+        Margin = new Thickness(0, 6, 0, 0),
     };
 
     private TextBlock MakeHint(string text) => new()

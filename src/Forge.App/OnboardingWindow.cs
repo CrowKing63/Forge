@@ -38,13 +38,13 @@ public sealed class OnboardingWindow : Window
         _modelPath = modelPath;
         Title = "Forge — first run";
         Width = 460;
-        Height = 230;
+        Height = 250;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         // S20: same dark theme as the settings window and the onboarding wizard.
         Background = ForgeTheme.BackgroundBrush;
         Foreground = ForgeTheme.TextBrush;
-        FontFamily = new FontFamily("Segoe UI");
-        FontSize = 13;
+        FontFamily = ForgeTheme.ThemeFont;
+        FontSize = 14;
         Resources = ForgeTheme.Build();
         BuildLayout();
     }

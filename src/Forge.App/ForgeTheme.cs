@@ -21,11 +21,17 @@ public static class ForgeTheme
     public static readonly SolidColorBrush FieldBrush = Brush(0x2A, 0x2A, 0x31);
     public static readonly SolidColorBrush HoverFieldBrush = Brush(0x33, 0x33, 0x3B);
     public static readonly SolidColorBrush BorderBrush = Brush(0x3A, 0x3A, 0x44);
-    public static readonly SolidColorBrush TextBrush = Brush(0xE8, 0xE8, 0xEC);
-    public static readonly SolidColorBrush MutedBrush = Brush(0x9A, 0x9A, 0xA5);
+    public static readonly SolidColorBrush TextBrush = Brush(0xF4, 0xF4, 0xF7);
+    public static readonly SolidColorBrush MutedBrush = Brush(0xB2, 0xB2, 0xBC);
     public static readonly SolidColorBrush AccentBrush = Brush(0xFF, 0xC4, 0x6B);
     private static readonly SolidColorBrush AccentHoverBrush = Brush(0xE8, 0xB2, 0x5C);
     private static readonly SolidColorBrush AccentPressedBrush = Brush(0xD4, 0xA0, 0x4E);
+
+    /// <summary>
+    /// The theme's typeface: Segoe UI Variable (Win11's variable-weight face — the closest
+    /// system match to the minimal modern look) with plain Segoe UI as the Win10 fallback.
+    /// </summary>
+    public static readonly FontFamily ThemeFont = new("Segoe UI Variable Text, Segoe UI");
 
     /// <summary>Builds the theme's ResourceDictionary for a window's Resources.</summary>
     public static ResourceDictionary Build()
@@ -33,6 +39,7 @@ public static class ForgeTheme
         var resources = new ResourceDictionary();
         resources.Add(typeof(TextBlock), TextBlockStyle());
         resources.Add("HintText", HintTextStyle());
+        resources.Add("BodyText", BodyTextStyle());
         resources.Add(typeof(TextBox), TextBoxStyle());
         resources.Add(typeof(CheckBox), CheckBoxStyle());
         resources.Add(typeof(RadioButton), RadioButtonStyle());
@@ -59,7 +66,18 @@ public static class ForgeTheme
         Setters =
         {
             new Setter(TextBlock.ForegroundProperty, MutedBrush),
-            new Setter(Controls.Control.FontSizeProperty, 12.0),
+            new Setter(Controls.Control.FontSizeProperty, 13.0),
+            new Setter(TextBlock.TextWrappingProperty, TextWrapping.Wrap),
+        },
+    };
+
+    /// <summary>Primary body copy at the theme's base size (full-brightness text).</summary>
+    private static Style BodyTextStyle() => new(typeof(TextBlock))
+    {
+        Setters =
+        {
+            new Setter(TextBlock.ForegroundProperty, TextBrush),
+            new Setter(Controls.Control.FontSizeProperty, 14.0),
             new Setter(TextBlock.TextWrappingProperty, TextWrapping.Wrap),
         },
     };
