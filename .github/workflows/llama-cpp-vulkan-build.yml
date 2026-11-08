@@ -13,21 +13,24 @@ jobs:
       - name: Download precompiled llama.cpp DLLs
         shell: pwsh
         run: |
-          # Install the NuGet packages that ship precompiled DLLs.
-          # They land in ./packages/ relative to the workspace.
-          dotnet nuget install LLamaSharp.Backend.Vulkan.Windows --version 0.30.0 -Source https://api.nuget.org/v3/index.json
-          dotnet nuget install LLamaSharp.Backend.Cpu.Windows --version 0.30.0 -Source https://api.nuget.org/v3/index.json
+          # Download the NuGet packages that ship precompiled DLLs directly
+          # from nuget.org (avoids deprecated dotnet nuget install).
+          New-Item -ItemType Directory -Force -Path nupkgs
+          Invoke-WebRequest -Uri "https://api.nuget.org/v3-flatcontainer/llamasharp.backend.vulkan.windows/0.30.0/llamasharp.backend.vulkan.windows.0.30.0.nupkg" -OutFile "nupkgs\vulkan.nupkg"
+          Invoke-WebRequest -Uri "https://api.nuget.org/v3-flatcontainer/llamasharp.backend.cpu.windows/0.30.0/llamasharp.backend.cpu.windows.0.30.0.nupkg" -OutFile "nupkgs\cpu.nupkg"
+          # Extract them
+          Expand-Archive -Path "nupkgs\vulkan.nupkg" -DestinationPath "packages\vulkan"
+          Expand-Archive -Path "nupkgs\cpu.nupkg" -DestinationPath "packages\cpu"
 
       - name: Collect artifacts
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifacts
           # These DLLs are already built and tested — no custom build needed.
-          $ws = $env:GITHUB_WORKSPACE
-          $src = "$ws\packages\llamasharp.backend.vulkan.windows\0.30.0\LLamaSharpRuntimes\win-x64\native"
+          $src = "packages\vulkan\runtimes\win-x64\native"
           Copy-Item "$src\ggml-vulkan.dll" artifacts/
           # CPU + base DLLs come from the main LLamaSharp package
-          $cpuSrc = "$ws\packages\llamasharp.backend.cpu.windows\0.30.0\LLamaSharpRuntimes\win-x64\native"
+          $cpuSrc = "packages\cpu\runtimes\win-x64\native"
           Copy-Item "$cpuSrc\ggml.dll" artifacts/
           Copy-Item "$cpuSrc\ggml-base.dll" artifacts/
           Copy-Item "$cpuSrc\ggml-cpu-*.dll" artifacts/
