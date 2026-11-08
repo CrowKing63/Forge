@@ -116,9 +116,15 @@ public static class ResultParser
         var token = new System.Text.StringBuilder();
         foreach (var c in s.ToLowerInvariant())
         {
-            if (char.IsLetter(c)) token.Append(c);
-            else if (token.Length >= 3) words.Add(token.ToString());
-            token.Clear();
+            if (char.IsLetter(c))
+            {
+                token.Append(c);
+            }
+            else
+            {
+                if (token.Length >= 3) words.Add(token.ToString());
+                token.Clear();
+            }
         }
         if (token.Length >= 3) words.Add(token.ToString());
         return words;
