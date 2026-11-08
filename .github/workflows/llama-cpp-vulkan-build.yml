@@ -22,20 +22,15 @@ jobs:
           Add-Content $env:GITHUB_ENV "VULKAN_SDK=C:\VulkanSDK\${env:VULKAN_VERSION}"
           Add-Content $env:GITHUB_PATH "C:\VulkanSDK\${env:VULKAN_VERSION}\bin"
 
-      - name: Clone llama.cpp
-        uses: actions/checkout@v4
-        with:
-          repository: ggml-org/llama.cpp
-          ref: main
-          path: llama.cpp
-          fetch-depth: 100
-
-      - name: Checkout pinned commit
+      - name: Download llama.cpp source
         shell: pwsh
         run: |
-          cd llama.cpp
-          git fetch origin ${{ env.LLAMA_CPP_REF }}
-          git checkout ${{ env.LLAMA_CPP_REF }}
+          $url = "https://github.com/ggml-org/llama.cpp/archive/$${env:LLAMA_CPP_REF}.tar.gz"
+          curl.exe -L -o llama-src.tar.gz "$url"
+          tar -xzf llama-src.tar.gz
+          # The extracted folder name includes the SHA
+          $dir = Get-ChildItem -Directory | Where-Object { $_.Name -like "llama.cpp-*" } | Select-Object -First 1
+          Move-Item $dir.FullName llama.cpp
 
       - name: Build llama.cpp (Vulkan + CPU)
         shell: pwsh
