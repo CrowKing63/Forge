@@ -25,7 +25,7 @@ jobs:
           Expand-Archive -Path vk_headers.zip -DestinationPath .
 
           # Download SPIRV-Headers (required by ggml-vulkan CMake)
-          $spirvUrl = "https://github.com/KhronosGroup/SPIRV-Headers/archive/refs/tags/sdk-1.4.309.0.zip"
+          $spirvUrl = "https://github.com/KhronosGroup/SPIRV-Headers/archive/refs/tags/vulkan-sdk-1.4.309.0.zip"
           Invoke-WebRequest -Uri $spirvUrl -OutFile spirv_headers.zip
           Expand-Archive -Path spirv_headers.zip -DestinationPath .
 
@@ -45,7 +45,7 @@ jobs:
             -DVulkan_INCLUDE_DIR="$includeDir" `
             -DVulkan_LIBRARY="$loader" `
             -Dglslc_EXECUTABLE="$glslc" `
-            -DSPIRV-Headers_DIR="$PWD/SPIRV-Headers-sdk-1.4.309.0" `
+            -DSPIRV-Headers_DIR="$PWD/SPIRV-Headers-vulkan-sdk-1.4.309.0" `
             -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
