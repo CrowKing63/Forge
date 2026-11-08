@@ -29,10 +29,15 @@ jobs:
       - name: Configure CMake
         shell: pwsh
         run: |
-          # Let CMake auto-detect the available Visual Studio instance.
+          # Point CMake's find_package(Vulkan) at our downloaded headers +
+          # the system loader. glslc is optional for llama.cpp (it uses
+          # precompiled SPIR-V), so we skip it.
+          $includeDir = "$PWD/Vulkan-Headers-1.4.309/include"
+          $loader = "C:\Windows\System32\vulkan-1.dll"
           cmake -B build-vulkan -A x64 `
             -DGGML_VULKAN=ON `
-            -DVULKAN_INCLUDE_DIR="$PWD/Vulkan-Headers-1.4.309/include" `
+            -DVulkan_INCLUDE_DIR="$includeDir" `
+            -DVulkan_LIBRARY="$loader" `
             -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
