@@ -1,0 +1,59 @@
+name: llama-cpp-vulkan-build
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Rebuild weekly in case the pinned commit's deps shift.
+    - cron: "0 6 * * 1"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout llama.cpp (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: e71c8f673
+
+      - name: Install Vulkan SDK
+        shell: pwsh
+        run: |
+          # Download Vulkan Headers (source archive — stable URL)
+          $url = "https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v1.4.309.zip"
+          Invoke-WebRequest -Uri $url -OutFile vk_headers.zip
+          Expand-Archive -Path vk_headers.zip -DestinationPath .
+          # The loader (vulkan-1.dll) ships with the Windows GPU driver on
+          # windows-latest; we only need the headers for compilation.
+
+      - name: Configure CMake
+        shell: pwsh
+        run: |
+          cmake -B build-vulkan -G "Visual Studio 17 2022" -A x64 `
+            -DGGML_VULKAN=ON `
+            -DVULKAN_INCLUDE_DIR="$PWD/Vulkan-Headers-1.4.309/include" `
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build build-vulkan --config Release --parallel
+
+      - name: Collect artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts
+          $src = "build-vulkan/bin/Release"
+          Copy-Item "$src/llama.dll" artifacts/
+          Copy-Item "$src/ggml.dll" artifacts/
+          Copy-Item "$src/ggml-base.dll" artifacts/
+          Copy-Item "$src/ggml-cpu-*.dll" artifacts/
+          Copy-Item "$src/ggml-vulkan.dll" artifacts/
+          # CUDA is optional; include it so the same artefact covers both backends.
+          if (Test-Path "$src/ggml-cuda.dll") { Copy-Item "$src/ggml-cuda.dll" artifacts/ }
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: llama-cpp-vulkan-win-x64
+          path: artifacts/
+          retention-days: 30

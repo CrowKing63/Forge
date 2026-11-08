@@ -37,6 +37,7 @@
     <None Include="$(LlamaRuntimeDir)\ggml-base.dll" Link="ggml-base.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('$(LlamaRuntimeDir)\ggml-base.dll')" />
     <None Include="$(LlamaRuntimeDir)\ggml-cpu-*.dll" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="$(LlamaRuntimeDir)\ggml-cuda.dll" Link="ggml-cuda.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('$(LlamaRuntimeDir)\ggml-cuda.dll')" />
+    <None Include="$(LlamaRuntimeDir)\ggml-vulkan.dll" Link="ggml-vulkan.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('$(LlamaRuntimeDir)\ggml-vulkan.dll')" />
   </ItemGroup>
 
 </Project>
