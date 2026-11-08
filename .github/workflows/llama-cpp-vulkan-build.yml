@@ -26,7 +26,7 @@ jobs:
         shell: pwsh
         run: |
           $sha = "${env:LLAMA_CPP_REF}"
-          curl.exe -L -o llama-src.tar.gz "https://github.com/ggml-org/llama.cpp/archive/$sha.tar.gz"
+          curl.exe -L -o llama-src.tar.gz "https://codeload.github.com/ggml-org/llama.cpp/tar.gz/$sha"
           tar -xzf llama-src.tar.gz
           # Extracted folder is llama.cpp-<sha>
           $src = "llama.cpp-$sha"
