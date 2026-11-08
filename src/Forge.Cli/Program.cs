@@ -91,7 +91,7 @@ Console.WriteLine($"[capture] {selected.Length} chars / {inputTokens} tokens: \"
 
 // ---- prompt assembly (S3, S16: single translate prompt; S21: two-tier) ----
 var family = ModelProfile.Detect(path);
-string prompt = ChatPromptBuilder.Build(selected, family, engine.ChatTemplate);
+string prompt = ChatPromptBuilder.Build(selected, family, engine.ChatTemplate, path);
 
 // ---- output budget: exact context size minus the exact prompt size, with a margin ----
 int promptTokens = engine.CountTokens(prompt);

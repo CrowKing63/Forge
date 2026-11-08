@@ -206,11 +206,15 @@ public partial class App : Application, IOnboardingHost
                 safetyMargin: 4096,
                 tokenCounter: engine.CountTokens);
             selected = capture.Capture(selected); // validates the token limit
+            DebugLog.Write("direct translate: token validation passed");
 
             // 2. Inference (S16: single prompt — translate to English).
             var family = ModelProfile.Detect(_modelPath);
-            var prompt = ChatPromptBuilder.Build(selected, family, engine.ChatTemplate);
+            DebugLog.Write($"direct translate: family={family}, template={(engine.ChatTemplate is null ? "null" : engine.ChatTemplate.Length + " chars")}");
+            var prompt = ChatPromptBuilder.Build(selected, family, engine.ChatTemplate, _modelPath);
+            DebugLog.Write($"direct translate: prompt built ({prompt.Length} chars)");
             var promptTokens = engine.CountTokens(prompt);
+            DebugLog.Write($"direct translate: prompt tokenized ({promptTokens} tokens)");
             var maxTokens = ModelProfile.MaxOutputTokens(family, Math.Max(16, engine.ContextSize - promptTokens - 256));
             DebugLog.Write($"direct translate: inference started ({promptTokens} prompt tokens)");
             var sb = new System.Text.StringBuilder();

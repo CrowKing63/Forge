@@ -24,12 +24,18 @@ public static class ChatPromptBuilder
     /// Uses the embedded Jinja template when <paramref name="chatTemplate"/> is a
     /// non-empty Jinja string; otherwise falls back to <see cref="PromptBuilder"/>.
     /// </summary>
-    public static string Build(string selectedText, ModelFamily family, string? chatTemplate)
+    public static string Build(string selectedText, ModelFamily family, string? chatTemplate, string modelPath)
     {
         if (selectedText is null || selectedText.Trim().Length == 0)
             throw new ArgumentException("Selected text must not be empty.", nameof(selectedText));
 
-        // Tier 2: render with the embedded Jinja template.
+        // Tier 1 (certified): skip Jinja entirely — use the known-good hardcoded markers.
+        // The Gemma 4 template is 18K chars of complex Jinja that our renderer can't
+        // parse (stack overflow). Certified models always use tier 1.
+        if (ModelCatalog.CertifiedModel.Match(modelPath) is not null)
+            return PromptBuilder.Build(selectedText, family);
+
+        // Tier 2 (unauthenticated): try the embedded Jinja template.
         if (!string.IsNullOrWhiteSpace(chatTemplate))
         {
             try
@@ -46,14 +52,14 @@ public static class ChatPromptBuilder
                 };
                 return JinjaRenderer.Render(chatTemplate, context);
             }
-            catch (JinjaRenderer.JinjaRenderException ex)
+            catch (Exception ex)
             {
                 // Template uses unsupported constructs — fall through to tier 1.
-                Console.Error.WriteLine($"[ChatPromptBuilder] Jinja render failed: {ex.Message}");
+                Console.Error.WriteLine($"[ChatPromptBuilder] Jinja render failed: {ex}");
             }
         }
 
-        // Tier 1: certified catalog format.
+        // Fallback: generic role markers.
         return PromptBuilder.Build(selectedText, family);
     }
 }

@@ -235,21 +235,26 @@ public sealed class InferenceEngine : IAsyncDisposable
         unsafe
         {
             float* p = (float*)logits;
+            int cap = Math.Min(TopK, vocabSize);
 
-            // Find the k-th largest logit value — the cutoff threshold.
-            float threshold = float.NegativeInfinity;
-            int above = 0;
-            for (int t = 0; t < vocabSize; t++)
+            // Find the k-th largest logit value (the cutoff threshold) without
+            // mutating the logits pointer.
+            var topVals = new float[cap];
+            var consumed = new bool[vocabSize];
+            for (int k = 0; k < cap; k++)
             {
-                if (p[t] >= threshold)
+                float best = float.NegativeInfinity;
+                int bestIdx = -1;
+                for (int t = 0; t < vocabSize; t++)
                 {
-                    if (above == TopK) threshold = p[t];
-                    above++;
+                    if (!consumed[t] && p[t] > best) { best = p[t]; bestIdx = t; }
                 }
+                topVals[k] = best;
+                if (bestIdx >= 0) consumed[bestIdx] = true;
             }
+            float threshold = topVals[cap - 1];
 
             // Keep every candidate at or above the threshold.
-            int cap = Math.Min(TopK, vocabSize);
             var ids = new int[cap];
             int n = 0;
             for (int t = 0; t < vocabSize && n < cap; t++)
