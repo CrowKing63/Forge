@@ -19,33 +19,23 @@ jobs:
       - name: Install Vulkan SDK
         shell: pwsh
         run: |
-          # Download Vulkan Headers (source archive — stable URL)
-          $url = "https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v1.4.309.zip"
-          Invoke-WebRequest -Uri $url -OutFile vk_headers.zip
-          Expand-Archive -Path vk_headers.zip -DestinationPath .
-
-          # Download SPIRV-Headers (required by ggml-vulkan CMake)
-          $spirvUrl = "https://github.com/KhronosGroup/SPIRV-Headers/archive/refs/tags/vulkan-sdk-1.4.309.0.zip"
-          Invoke-WebRequest -Uri $spirvUrl -OutFile spirv_headers.zip
-          Expand-Archive -Path spirv_headers.zip -DestinationPath .
-
-          # Download glslc (GLSL→SPIR-V compiler, required by find_package)
-          $glslcUrl = "https://github.com/KhronosGroup/glslc/releases/latest/download/glslc-windows-x86_64.zip"
-          Invoke-WebRequest -Uri $glslcUrl -OutFile glslc.zip
-          Expand-Archive -Path glslc.zip -DestinationPath glslc-bin
+          # Download and install the full Vulkan SDK from LunarG (includes
+          # headers, loader, glslc, SPIRV-Headers).
+          $sdkUrl = "https://vulkan.lunarg.com/sdk/downloads/windows-1.4.309.0-installer.exe"
+          Invoke-WebRequest -Uri $sdkUrl -OutFile vulkan_sdk_installer.exe
+          # Silent install to C:\VulkanSDK
+          .\vulkan_sdk_installer.exe /s /v1 /D=C:\VulkanSDK
 
       - name: Configure CMake
         shell: pwsh
         run: |
-          $includeDir = "$PWD/Vulkan-Headers-1.4.309/include"
-          $loader = "C:\Windows\System32\vulkan-1.dll"
-          $glslc = "$PWD/glslc-bin/glslc.exe"
+          $sdk = "C:\VulkanSDK\1.4.309.0"
           cmake -B build-vulkan -A x64 `
             -DGGML_VULKAN=ON `
-            -DVulkan_INCLUDE_DIR="$includeDir" `
-            -DVulkan_LIBRARY="$loader" `
-            -Dglslc_EXECUTABLE="$glslc" `
-            -DSPIRV-Headers_DIR="$PWD/SPIRV-Headers-vulkan-sdk-1.4.309.0" `
+            -DVulkan_INCLUDE_DIR="$sdk\include" `
+            -DVulkan_LIBRARY="$sdk\Lib\vulkan-1.dll" `
+            -Dglslc_EXECUTABLE="$sdk\Bin\glslc.exe" `
+            -DSPIRV-Headers_DIR="$sdk\SPIRV-Headers" `
             -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
