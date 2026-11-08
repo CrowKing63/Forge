@@ -193,6 +193,7 @@ internal sealed class JinjaRenderer
     internal sealed record KeywordArgNode(string Name, ExprNode Value) : ExprNode;
     internal sealed record ConditionalNode(ExprNode IfTrue, ExprNode Cond, ExprNode IfFalse) : ExprNode;
     internal sealed record MethodCallNode(ExprNode Target, string Method, List<ExprNode> Args) : ExprNode;
+    internal sealed record DictLiteralNode(List<(string Key, ExprNode Value)> Entries) : ExprNode;
 
     // ========================================================================
     // Parser — structural (handles nested if/for/macro blocks)
@@ -554,6 +555,39 @@ internal sealed class JinjaRenderer
                         break;
                     }
                     return new LiteralNode(items);
+                }
+
+                // Dict literal: {key: value, key: value, ...}
+                if (c == '{')
+                {
+                    _pos++;
+                    var entries = new List<(string Key, ExprNode Value)>();
+                    SkipWs();
+                    if (_pos < _src.Length && _src[_pos] == '}')
+                    {
+                        _pos++;
+                        return new DictLiteralNode(entries);
+                    }
+                    while (_pos < _src.Length)
+                    {
+                        SkipWs();
+                        // Parse key: string or name
+                        string key;
+                        if (_src[_pos] == '"' || _src[_pos] == '\'')
+                            key = ReadString();
+                        else
+                            key = ReadName();
+                        SkipWs();
+                        if (_pos < _src.Length && _src[_pos] == ':')
+                            _pos++; // consume :
+                        var val = ParseComparison();
+                        entries.Add((key, val));
+                        SkipWs();
+                        if (_pos < _src.Length && _src[_pos] == ',') { _pos++; continue; }
+                        if (_pos < _src.Length && _src[_pos] == '}') { _pos++; break; }
+                        break;
+                    }
+                    return new DictLiteralNode(entries);
                 }
 
                 if (c == '\'' || c == '"')
@@ -981,6 +1015,7 @@ internal sealed class JinjaRenderer
                         "number" => iv is long or double,
                         "integer" or "int" => iv is long,
                         "float" => iv is double,
+                        "defined" => iv is not null,
                         _ => throw new JinjaRenderException($"Unsupported test: {isN.Test}"),
                     };
                     return isN.Negated ? !testResult : testResult;
@@ -988,6 +1023,13 @@ internal sealed class JinjaRenderer
                     return ApplyFilter(f, EvalExpr(f.Input));
                 case MethodCallNode mc:
                     return InvokeMethod(mc, EvalExpr(mc.Target));
+                case DictLiteralNode dl:
+                {
+                    var dictResult = new Dictionary<string, object?>();
+                    foreach (var (k, v) in dl.Entries)
+                        dictResult[k] = EvalExpr(v);
+                    return dictResult;
+                }
                 case CallNode call:
                     if (call.Target is VarNode cv)
                     {
