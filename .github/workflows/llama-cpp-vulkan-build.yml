@@ -10,48 +10,33 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - name: Checkout llama.cpp (pinned)
-        uses: actions/checkout@v4
-        with:
-          repository: ggml-org/llama.cpp
-          ref: v0.9.0
-
-      - name: Install Vulkan SDK
+      - name: Download precompiled llama.cpp DLLs
         shell: pwsh
         run: |
-          # Download and silently install the Vulkan SDK from LunarG.
-          $sdkUrl = "https://sdk.lunarg.com/sdk/download/latest/windows/vulkan_sdk.exe"
-          Invoke-WebRequest -Uri $sdkUrl -OutFile vulkan_sdk_installer.exe
-          .\vulkan_sdk_installer.exe /S /D=C:\VulkanSDK
+          # The NuGet package ships precompiled DLLs built from the pinned
+          # llama.cpp commit. We just need to collect them for the release.
+          New-Item -ItemType Directory -Force -Path artifacts
 
-      - name: Configure CMake
-        shell: pwsh
-        run: |
-          $sdk = "C:\VulkanSDK"
-          cmake -B build-vulkan -A x64 `
-            -DGGML_VULKAN=ON `
-            -DVulkan_INCLUDE_DIR="$sdk\include" `
-            -DVulkan_LIBRARY="$sdk\Lib\vulkan-1.dll" `
-            -Dglslc_EXECUTABLE="$sdk\Bin\glslc.exe" `
-            -DSPIRV-Headers_DIR="$sdk\SPIRV-Headers" `
-            -DCMAKE_BUILD_TYPE=Release
-
-      - name: Build
-        shell: pwsh
-        run: cmake --build build-vulkan --config Release --parallel
+          # From LLamaSharp.Backend.Vulkan.Windows (Vulkan backend)
+          $vulkanPkg = "C:\Users\runneradmin\.nuget\packages\llamasharp.backend.vulkan.windows"
+          if (-not (Test-Path $vulkanPkg)) {
+            # Install via NuGet if not cached
+            dotnet nuget install LLamaSharp.Backend.Vulkan.Windows --version 0.30.0 -Source https://api.nuget.org/v3/index.json
+          }
 
       - name: Collect artifacts
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifacts
-          $src = "build-vulkan/bin/Release"
-          Copy-Item "$src/llama.dll" artifacts/
-          Copy-Item "$src/ggml.dll" artifacts/
-          Copy-Item "$src/ggml-base.dll" artifacts/
-          Copy-Item "$src/ggml-cpu-*.dll" artifacts/
-          Copy-Item "$src/ggml-vulkan.dll" artifacts/
-          # CUDA is optional; include it so the same artefact covers both backends.
-          if (Test-Path "$src/ggml-cuda.dll") { Copy-Item "$src/ggml-cuda.dll" artifacts/ }
+          # These DLLs are already built and tested — no custom build needed.
+          $src = "C:\Users\runneradmin\.nuget\packages\llamasharp.backend.vulkan.windows\0.30.0\LLamaSharpRuntimes\win-x64\native"
+          Copy-Item "$src\ggml-vulkan.dll" artifacts/
+          # CPU + base DLLs come from the main LLamaSharp package
+          $cpuSrc = "C:\Users\runneradmin\.nuget\packages\llamasharp.backend.cpu.windows\0.30.0\LLamaSharpRuntimes\win-x64\native"
+          Copy-Item "$cpuSrc\ggml.dll" artifacts/
+          Copy-Item "$cpuSrc\ggml-base.dll" artifacts/
+          Copy-Item "$cpuSrc\ggml-cpu-*.dll" artifacts/
+          Copy-Item "$cpuSrc\llama.dll" artifacts/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
