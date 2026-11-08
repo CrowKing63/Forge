@@ -23,21 +23,29 @@ jobs:
           $url = "https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v1.4.309.zip"
           Invoke-WebRequest -Uri $url -OutFile vk_headers.zip
           Expand-Archive -Path vk_headers.zip -DestinationPath .
-          # The loader (vulkan-1.dll) ships with the Windows GPU driver on
-          # windows-latest; we only need the headers for compilation.
+
+          # Download SPIRV-Headers (required by ggml-vulkan CMake)
+          $spirvUrl = "https://github.com/KhronosGroup/SPIRV-Headers/archive/refs/tags/sdk-1.4.309.0.zip"
+          Invoke-WebRequest -Uri $spirvUrl -OutFile spirv_headers.zip
+          Expand-Archive -Path spirv_headers.zip -DestinationPath .
+
+          # Download glslc (GLSL→SPIR-V compiler, required by find_package)
+          $glslcUrl = "https://github.com/KhronosGroup/glslc/releases/latest/download/glslc-windows-x86_64.zip"
+          Invoke-WebRequest -Uri $glslcUrl -OutFile glslc.zip
+          Expand-Archive -Path glslc.zip -DestinationPath glslc-bin
 
       - name: Configure CMake
         shell: pwsh
         run: |
-          # Point CMake's find_package(Vulkan) at our downloaded headers +
-          # the system loader. glslc is optional for llama.cpp (it uses
-          # precompiled SPIR-V), so we skip it.
           $includeDir = "$PWD/Vulkan-Headers-1.4.309/include"
           $loader = "C:\Windows\System32\vulkan-1.dll"
+          $glslc = "$PWD/glslc-bin/glslc.exe"
           cmake -B build-vulkan -A x64 `
             -DGGML_VULKAN=ON `
             -DVulkan_INCLUDE_DIR="$includeDir" `
             -DVulkan_LIBRARY="$loader" `
+            -Dglslc_EXECUTABLE="$glslc" `
+            -DSPIRV-Headers_DIR="$PWD/SPIRV-Headers-sdk-1.4.309.0" `
             -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
