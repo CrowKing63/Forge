@@ -16,7 +16,7 @@ namespace Forge.Core;
 internal static class LlamaNative
 {
     internal const string LlamaDllName = "llama.dll";
-    internal const string GgmlDllName = "ggml.dll";
+    internal const string GgmlDllName = "ggml-base.dll";
 
     private static bool _backendsLoaded;
     private static readonly object InitGate = new();
