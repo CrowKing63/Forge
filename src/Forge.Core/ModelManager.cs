@@ -5,9 +5,8 @@ using System.Security.Cryptography;
 namespace Forge.Core;
 
 /// <summary>
-/// Metadata for one model in the catalog. The built-in default entry carries a known
-/// SHA256 and size; user-dropped GGUFs (discovered from the models directory) have no
-/// verified checksum and no download URL.
+/// Metadata for one model in the catalog. Every catalog entry carries a known SHA256,
+/// size, and download URL — models are obtained by download only.
 /// </summary>
 /// <param name="Id">Unique key; also the file name without extension (<c>&lt;id&gt;.gguf</c>).</param>
 /// <param name="Name">Display name for UI.</param>
@@ -46,9 +45,10 @@ public sealed record DownloadProgress(long BytesReceived, long TotalBytes)
 /// Downloads and manages GGUF model files under a models directory
 /// (<c>%LOCALAPPDATA%\Forge\Models\*.gguf</c>).
 ///
-/// Catalog: the built-in default (Gemma 4 E2B UD-Q4_K_XL) plus any user GGUFs already
-/// present in the directory. Downloads are resumable (HTTP Range), verified against the
-/// catalog SHA256, and guarded by a free-disk-space check. A download writes to
+/// Catalog: the built-in default (Gemma 4 E2B UD-Q4_K_XL). Models are obtained by
+/// download only — files dropped into the directory are not listed, selectable, or
+/// verified. Downloads are resumable (HTTP Range), verified against the catalog SHA256,
+/// and guarded by a free-disk-space check. A download writes to
 /// <c>&lt;id&gt;.gguf.part</c> and is renamed to the final name only after verification
 /// passes, so an interrupted or corrupt download never masquerades as a model.
 ///
@@ -92,30 +92,10 @@ public sealed class ModelManager
     }
 
     /// <summary>
-    /// The catalog: the built-in default plus every user GGUF already in the models
-    /// directory (scanned by file name; unverified entries have no checksum/URL).
+    /// The built-in catalog of supported models. Models are obtained by download only —
+    /// files dropped into the models directory are not part of the catalog.
     /// </summary>
-    public IReadOnlyList<ModelInfo> ListModels()
-    {
-        var models = new List<ModelInfo> { DefaultModel };
-        if (Directory.Exists(_modelsDir))
-        {
-            foreach (var file in Directory.EnumerateFiles(_modelsDir, "*.gguf"))
-            {
-                var id = Path.GetFileNameWithoutExtension(file);
-                if (models.Any(m => string.Equals(m.Id, id, StringComparison.OrdinalIgnoreCase)))
-                    continue;
-                models.Add(new ModelInfo(
-                    Id: id,
-                    Name: id,
-                    Quantization: "",
-                    SizeBytes: new FileInfo(file).Length,
-                    Sha256: "",
-                    DownloadUrl: ""));
-            }
-        }
-        return models;
-    }
+    public IReadOnlyList<ModelInfo> ListModels() => new[] { DefaultModel };
 
     /// <summary>The final file path for a model inside the models directory.</summary>
     public string GetPath(ModelInfo model)

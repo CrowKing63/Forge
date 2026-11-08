@@ -170,18 +170,16 @@ public class ModelManagerTests : IDisposable
     }
 
     [Fact]
-    public void ListModelsIncludesBuiltInAndUserGgufs()
+    public void ListModelsReturnsCatalogOnly()
     {
+        // A file dropped into the directory is not part of the catalog (no manual add).
         File.WriteAllBytes(Path.Combine(_dir, "my-user-model.gguf"), new byte[] { 1, 2, 3 });
         var manager = new ModelManager(_dir);
 
         var models = manager.ListModels();
 
-        Assert.Contains(models, m => m.Id == ModelManager.DefaultModelId);
-        var user = models.Single(m => m.Id == "my-user-model");
-        Assert.Equal(3, user.SizeBytes);
-        Assert.Equal(string.Empty, user.Sha256);
-        Assert.Equal(string.Empty, user.DownloadUrl);
+        Assert.Single(models);
+        Assert.Equal(ModelManager.DefaultModelId, models[0].Id);
     }
 
     [Fact]

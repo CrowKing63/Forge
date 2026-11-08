@@ -54,6 +54,12 @@ try
 {
     engine.LoadModel(path);
 }
+catch (LLama.Exceptions.LoadWeightsFailedException ex)
+{
+    Console.Error.WriteLine($"[load] {ex.Message}");
+    Console.Error.WriteLine("[load] The bundled llama.cpp runtime does not support this model's architecture.");
+    return 1;
+}
 catch (Exception ex) when (ex is FileNotFoundException or ArgumentException)
 {
     Console.Error.WriteLine($"[load] {ex.Message}");

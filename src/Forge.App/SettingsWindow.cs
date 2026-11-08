@@ -207,9 +207,9 @@ public sealed class SettingsWindow : Window
     {
         var panel = new StackPanel();
 
-        // S18: models are clickable cards, not a dropdown. Every GGUF in the models
-        // directory is detected and listed; clicking one selects it (auto-save + hot-swap).
-        // No manual path entry — dropping a file into the folder makes it appear here.
+        // S18: catalog models are clickable cards, not a dropdown. Clicking one selects
+        // it (auto-save + hot-swap). Models are obtained by download only — the folder
+        // button opens the models directory for inspection.
         var title = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -226,7 +226,7 @@ public sealed class SettingsWindow : Window
         panel.Children.Add(title);
         _modelList = new StackPanel();
         panel.Children.Add(_modelList);
-        panel.Children.Add(MakeHint("Drop .gguf files into the models folder to add them; click one to select it."));
+        panel.Children.Add(MakeHint("Click a model to select it. Models you do not have yet are in the download section below."));
 
         // S18: download section — catalog models not yet on disk.
         panel.Children.Add(MakeSectionLabel("Download"));
@@ -337,11 +337,6 @@ public sealed class SettingsWindow : Window
                 : $"{m.Quantization} · {m.SizeBytes / 1024 / 1024} MB";
             _modelList.Children.Add(MakeModelRow(m.Name, sub, manager.GetPath(m)));
         }
-
-        // If the configured path is outside the directory (e.g. a custom location), keep it
-        // selectable so saving doesn't silently switch models.
-        if (_modelRows.All(r => !string.Equals(r.Path, _selectedModelPath, StringComparison.OrdinalIgnoreCase)))
-            _modelList.Children.Add(MakeModelRow(Path.GetFileNameWithoutExtension(_settings.ModelPath), "", _settings.ModelPath));
 
         UpdateModelSelection();
 
