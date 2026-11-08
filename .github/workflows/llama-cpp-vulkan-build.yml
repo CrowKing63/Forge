@@ -13,16 +13,9 @@ jobs:
       - name: Download precompiled llama.cpp DLLs
         shell: pwsh
         run: |
-          # The NuGet package ships precompiled DLLs built from the pinned
-          # llama.cpp commit. We just need to collect them for the release.
-          New-Item -ItemType Directory -Force -Path artifacts
-
-          # From LLamaSharp.Backend.Vulkan.Windows (Vulkan backend)
-          $vulkanPkg = "C:\Users\runneradmin\.nuget\packages\llamasharp.backend.vulkan.windows"
-          if (-not (Test-Path $vulkanPkg)) {
-            # Install via NuGet if not cached
-            dotnet nuget install LLamaSharp.Backend.Vulkan.Windows --version 0.30.0 -Source https://api.nuget.org/v3/index.json
-          }
+          # Install the NuGet packages that ship precompiled DLLs.
+          dotnet nuget install LLamaSharp.Backend.Vulkan.Windows --version 0.30.0 -Source https://api.nuget.org/v3/index.json
+          dotnet nuget install LLamaSharp.Backend.Cpu.Windows --version 0.30.0 -Source https://api.nuget.org/v3/index.json
 
       - name: Collect artifacts
         shell: pwsh
