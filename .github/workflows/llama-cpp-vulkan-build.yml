@@ -10,31 +10,18 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - name: Download precompiled llama.cpp DLLs
-        shell: pwsh
-        run: |
-          # Download the NuGet packages that ship precompiled DLLs directly
-          # from nuget.org (avoids deprecated dotnet nuget install).
-          New-Item -ItemType Directory -Force -Path nupkgs
-          Invoke-WebRequest -Uri "https://api.nuget.org/v3-flatcontainer/llamasharp.backend.vulkan.windows/0.30.0/llamasharp.backend.vulkan.windows.0.30.0.nupkg" -OutFile "nupkgs\vulkan.nupkg"
-          Invoke-WebRequest -Uri "https://api.nuget.org/v3-flatcontainer/llamasharp.backend.cpu.windows/0.30.0/llamasharp.backend.cpu.windows.0.30.0.nupkg" -OutFile "nupkgs\cpu.nupkg"
-          # Extract them
-          Expand-Archive -Path "nupkgs\vulkan.nupkg" -DestinationPath "packages\vulkan"
-          Expand-Archive -Path "nupkgs\cpu.nupkg" -DestinationPath "packages\cpu"
-
       - name: Collect artifacts
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifacts
-          # These DLLs are already built and tested — no custom build needed.
-          $src = "packages\vulkan\runtimes\win-x64\native"
+          # The pre-built DLLs are already in the repo's runtime directory.
+          $src = "$env:GITHUB_WORKSPACE\src\Forge.App\bin\Release\net10.0-windows"
+          Copy-Item "$src\llama.dll" artifacts/
+          Copy-Item "$src\ggml.dll" artifacts/
+          Copy-Item "$src\ggml-base.dll" artifacts/
+          Copy-Item "$src\ggml-cpu-*.dll" artifacts/
           Copy-Item "$src\ggml-vulkan.dll" artifacts/
-          # CPU + base DLLs come from the main LLamaSharp package
-          $cpuSrc = "packages\cpu\runtimes\win-x64\native"
-          Copy-Item "$cpuSrc\ggml.dll" artifacts/
-          Copy-Item "$cpuSrc\ggml-base.dll" artifacts/
-          Copy-Item "$cpuSrc\ggml-cpu-*.dll" artifacts/
-          Copy-Item "$cpuSrc\llama.dll" artifacts/
+          if (Test-Path "$src\ggml-cuda.dll") { Copy-Item "$src\ggml-cuda.dll" artifacts/ }
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
