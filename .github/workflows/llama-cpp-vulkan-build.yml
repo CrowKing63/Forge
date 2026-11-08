@@ -23,10 +23,18 @@ jobs:
           Add-Content $env:GITHUB_PATH "C:\VulkanSDK\${env:VULKAN_VERSION}\bin"
 
       - name: Clone llama.cpp
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: main
+          path: llama.cpp
+          fetch-depth: 100
+
+      - name: Checkout pinned commit
         shell: pwsh
         run: |
-          git clone "https://github.com/ggml-org/llama.git" llama.cpp
           cd llama.cpp
+          git fetch origin ${{ env.LLAMA_CPP_REF }}
           git checkout ${{ env.LLAMA_CPP_REF }}
 
       - name: Build llama.cpp (Vulkan + CPU)
