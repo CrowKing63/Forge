@@ -25,9 +25,8 @@ jobs:
       - name: Clone llama.cpp
         shell: pwsh
         run: |
-          git clone --depth 1 "https://github.com/ggml-org/llama.git" llama.cpp
+          git clone --depth 1 --tags "https://github.com/ggml-org/llama.git" llama.cpp
           cd llama.cpp
-          git fetch --depth 1 origin tag ${{ env.LLAMA_CPP_REF }}
           git checkout ${{ env.LLAMA_CPP_REF }}
 
       - name: Build llama.cpp (Vulkan + CPU)
