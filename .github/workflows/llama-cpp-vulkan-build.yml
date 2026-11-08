@@ -19,23 +19,24 @@ jobs:
       - name: Install Vulkan SDK
         shell: pwsh
         run: |
-          # Download and install the full Vulkan SDK from LunarG (includes
-          # headers, loader, glslc, SPIRV-Headers).
-          $sdkUrl = "https://sdk.lunarg.com/sdk/download/latest/windows/vulkan_sdk.exe"
-          Invoke-WebRequest -Uri $sdkUrl -OutFile vulkan_sdk_installer.exe
-          # Silent install to C:\VulkanSDK
-          .\vulkan_sdk_installer.exe /SILENT /SUPPRESSMSGBOXES /D=C:\VulkanSDK
+          # Download the Vulkan SDK tarball (no installer needed).
+          $sdkUrl = "https://sdk.lunarg.com/sdk/download/latest/windows/vulkan_sdk.tar.xz"
+          Invoke-WebRequest -Uri $sdkUrl -OutFile vulkan_sdk.tar.xz
+          tar -xf vulkan_sdk.tar.xz
+          # The extracted folder is named like "VulkanSDK-1.4.309.0"
+          $sdkDir = Get-ChildItem -Directory | Where-Object { $_.Name -like "VulkanSDK-*" } | Select-Object -First 1
+          Write-Host "SDK dir: $($sdkDir.FullName)"
 
       - name: Configure CMake
         shell: pwsh
         run: |
-          $sdk = "C:\VulkanSDK\1.4.309.0"
+          $sdkDir = Get-ChildItem -Directory | Where-Object { $_.Name -like "VulkanSDK-*" } | Select-Object -First 1
           cmake -B build-vulkan -A x64 `
             -DGGML_VULKAN=ON `
-            -DVulkan_INCLUDE_DIR="$sdk\include" `
-            -DVulkan_LIBRARY="$sdk\Lib\vulkan-1.dll" `
-            -Dglslc_EXECUTABLE="$sdk\Bin\glslc.exe" `
-            -DSPIRV-Headers_DIR="$sdk\SPIRV-Headers" `
+            -DVulkan_INCLUDE_DIR="$($sdkDir.FullName)\include" `
+            -DVulkan_LIBRARY="$($sdkDir.FullName)\Lib\vulkan-1.dll" `
+            -Dglslc_EXECUTABLE="$($sdkDir.FullName)\Bin\glslc.exe" `
+            -DSPIRV-Headers_DIR="$($sdkDir.FullName)\SPIRV-Headers" `
             -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
