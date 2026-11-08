@@ -44,6 +44,12 @@ public sealed class InferenceEngine : IAsyncDisposable
         get { lock (_gate) { return _session?.ChatTemplate; } }
     }
 
+    /// <summary>The support tier of the loaded model (certified catalog vs unauthenticated).</summary>
+    public ModelTier ModelTier { get; private set; } = ModelTier.Unauthenticated;
+
+    /// <summary>The detected model family of the loaded model.</summary>
+    public ModelFamily ModelFamily { get; private set; }
+
     /// <summary>Sampling temperature (default 0.8 — the llama.cpp server default).</summary>
     public float Temperature { get; set; } = 0.8f;
 
@@ -82,6 +88,11 @@ public sealed class InferenceEngine : IAsyncDisposable
         lock (_gate)
         {
             UnloadCore();
+
+            // Determine tier and family from the catalog.
+            var certified = ModelCatalog.CertifiedModel.Match(modelPath);
+            ModelTier = certified is not null ? ModelTier.Certified : ModelTier.Unauthenticated;
+            ModelFamily = ModelProfile.Detect(modelPath);
 
             if (GpuLayerCount > 0)
             {
@@ -287,6 +298,8 @@ public sealed class InferenceEngine : IAsyncDisposable
     {
         _session?.Dispose();
         _session = null;
+        ModelTier = ModelTier.Unauthenticated;
+        ModelFamily = ModelFamily.Gemma4;
     }
 
     public ValueTask DisposeAsync()
