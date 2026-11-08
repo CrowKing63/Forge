@@ -21,7 +21,7 @@ jobs:
         run: |
           # Download and install the full Vulkan SDK from LunarG (includes
           # headers, loader, glslc, SPIRV-Headers).
-          $sdkUrl = "https://vulkan.lunarg.com/sdk/downloads/windows-1.4.309.0-installer.exe"
+          $sdkUrl = "https://sdk.lunarg.com/sdk/download/latest/windows/vulkan_sdk.exe"
           Invoke-WebRequest -Uri $sdkUrl -OutFile vulkan_sdk_installer.exe
           # Silent install to C:\VulkanSDK
           .\vulkan_sdk_installer.exe /s /v1 /D=C:\VulkanSDK
