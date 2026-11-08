@@ -24,7 +24,7 @@ jobs:
           $sdkUrl = "https://sdk.lunarg.com/sdk/download/latest/windows/vulkan_sdk.exe"
           Invoke-WebRequest -Uri $sdkUrl -OutFile vulkan_sdk_installer.exe
           # Silent install to C:\VulkanSDK
-          .\vulkan_sdk_installer.exe /s /v1 /D=C:\VulkanSDK
+          .\vulkan_sdk_installer.exe /SILENT /SUPPRESSMSGBOXES /D=C:\VulkanSDK
 
       - name: Configure CMake
         shell: pwsh
