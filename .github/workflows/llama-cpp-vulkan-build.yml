@@ -8,7 +8,7 @@ on:
 
 env:
   VULKAN_VERSION: 1.4.313.2
-  LLAMA_CPP_COMMIT: e71c8f673
+  LLAMA_CPP_REF: v0.9.0
 
 jobs:
   build:
@@ -25,10 +25,7 @@ jobs:
       - name: Clone llama.cpp
         shell: pwsh
         run: |
-          git clone --depth 1 "https://github.com/ggml-org/llama.git" llama.cpp
-          cd llama.cpp
-          git fetch --depth 1 origin ${{ env.LLAMA_CPP_COMMIT }}
-          git checkout ${{ env.LLAMA_CPP_COMMIT }}
+          git clone --depth 1 --branch ${{ env.LLAMA_CPP_REF }} "https://github.com/ggml-org/llama.git" llama.cpp
 
       - name: Build llama.cpp (Vulkan + CPU)
         shell: pwsh
