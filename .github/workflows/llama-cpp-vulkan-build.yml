@@ -23,10 +23,11 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path artifacts
           # These DLLs are already built and tested — no custom build needed.
-          $src = "packages\llamasharp.backend.vulkan.windows\0.30.0\LLamaSharpRuntimes\win-x64\native"
+          $ws = $env:GITHUB_WORKSPACE
+          $src = "$ws\packages\llamasharp.backend.vulkan.windows\0.30.0\LLamaSharpRuntimes\win-x64\native"
           Copy-Item "$src\ggml-vulkan.dll" artifacts/
           # CPU + base DLLs come from the main LLamaSharp package
-          $cpuSrc = "packages\llamasharp.backend.cpu.windows\0.30.0\LLamaSharpRuntimes\win-x64\native"
+          $cpuSrc = "$ws\packages\llamasharp.backend.cpu.windows\0.30.0\LLamaSharpRuntimes\win-x64\native"
           Copy-Item "$cpuSrc\ggml.dll" artifacts/
           Copy-Item "$cpuSrc\ggml-base.dll" artifacts/
           Copy-Item "$cpuSrc\ggml-cpu-*.dll" artifacts/
