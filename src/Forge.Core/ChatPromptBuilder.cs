@@ -40,10 +40,10 @@ public static class ChatPromptBuilder
         {
             try
             {
-                var messages = new List<Dictionary<string, object?>>
+                var messages = new List<object?>
                 {
-                    new() { ["role"] = "system", ["content"] = SystemInstruction },
-                    new() { ["role"] = "user", ["content"] = selectedText },
+                    new Dictionary<string, object?> { ["role"] = "system", ["content"] = SystemInstruction },
+                    new Dictionary<string, object?> { ["role"] = "user", ["content"] = selectedText },
                 };
                 var context = new Dictionary<string, object?>
                 {

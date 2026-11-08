@@ -10,8 +10,10 @@ namespace Forge.Core;
 /// template is not in that list, so Forge renders the embedded template itself with this
 /// interpreter. The supported subset covers what LLM chat templates actually use:
 /// <c>{{ expr }}</c>, <c>{% if/elif/else %}</c>, <c>{% for %}</c>, <c>{% set %}</c>,
-/// <c>{% macro %}</c>, <c>is</c> type tests, filters (<c>default</c>, <c>tojson</c>, <c>trim</c>,
-/// <c>join</c>, <c>length</c>, <c>upper</c>, <c>lower</c>, <c>string</c>, <c>bool</c>), and
+/// <c>{% macro %}</c>, <c>{% generation %}</c>, <c>is</c> type tests, filters (<c>default</c>,
+/// <c>tojson</c>, <c>trim</c>, <c>join</c>, <c>length</c>, <c>upper</c>, <c>lower</c>,
+/// <c>string</c>, <c>bool</c>, <c>replace</c>), method calls (<c>.get()</c>, <c>.split()</c>,
+/// <c>.endswith()</c>, <c>.items()</c>), slice notation, <c>namespace()</c>, and
 /// whitespace control (<c>{%- -%}</c>).
 ///
 /// Verification: for each catalog model, the rendered prompt is byte-compared against the
@@ -58,6 +60,8 @@ internal sealed class JinjaRenderer
         EndFor,   // {% endfor %}
         Macro,    // {% macro name(a, b) %}
         EndMacro, // {% endmacro %}
+        Generation,  // {% generation %} (no-op marker)
+        EndGeneration, // {% endgeneration %} (no-op marker)
     }
 
     internal sealed record Token(TagKind Kind, string Body, int Pos)
@@ -135,6 +139,8 @@ internal sealed class JinjaRenderer
             if (trimmed == "endfor") return TagKind.EndFor;
             if (trimmed.StartsWith("macro ", StringComparison.Ordinal)) return TagKind.Macro;
             if (trimmed == "endmacro") return TagKind.EndMacro;
+            if (trimmed == "generation") return TagKind.Generation;
+            if (trimmed == "endgeneration") return TagKind.EndGeneration;
 
             throw new JinjaRenderException($"Unsupported statement: {body}");
         }
@@ -167,6 +173,7 @@ internal sealed class JinjaRenderer
     internal sealed record IfNode(List<(ExprNode Cond, List<AstNode> Body)> Branches, List<AstNode>? ElseBody) : AstNode;
     internal sealed record ForNode(string VarName, ExprNode Iterable, List<AstNode> Body) : AstNode;
     internal sealed record MacroDefNode(string Name, List<string> ParamNames, List<AstNode> Body) : AstNode;
+    internal sealed record NoOpNode : AstNode;
 
     // Expression nodes.
     internal abstract record ExprNode;
@@ -174,6 +181,7 @@ internal sealed class JinjaRenderer
     internal sealed record VarNode(string Name) : ExprNode;
     internal sealed record AttrNode(ExprNode Target, string Name) : ExprNode;
     internal sealed record IndexNode(ExprNode Target, ExprNode Index) : ExprNode;
+    internal sealed record SliceNode(ExprNode Target, ExprNode? Lower, ExprNode? Upper) : ExprNode;
     internal sealed record CompareNode(ExprNode Left, string Op, ExprNode Right) : ExprNode;
     internal sealed record ArithNode(string Op, ExprNode Left, ExprNode Right) : ExprNode;
     internal sealed record BoolOpNode(string Op, List<ExprNode> Values) : ExprNode;
@@ -184,6 +192,7 @@ internal sealed class JinjaRenderer
     internal sealed record CallNode(ExprNode Target, List<ExprNode> Args) : ExprNode;
     internal sealed record KeywordArgNode(string Name, ExprNode Value) : ExprNode;
     internal sealed record ConditionalNode(ExprNode IfTrue, ExprNode Cond, ExprNode IfFalse) : ExprNode;
+    internal sealed record MethodCallNode(ExprNode Target, string Method, List<ExprNode> Args) : ExprNode;
 
     // ========================================================================
     // Parser — structural (handles nested if/for/macro blocks)
@@ -227,6 +236,12 @@ internal sealed class JinjaRenderer
                         _pos++;
                         break;
 
+                    case TagKind.Generation:
+                    case TagKind.EndGeneration:
+                        nodes.Add(new NoOpNode());
+                        _pos++;
+                        break;
+
                     case TagKind.Set:
                     {
                         int eq = FindTopLevelChar(t.Body, '=');
@@ -250,14 +265,15 @@ internal sealed class JinjaRenderer
 
                     case TagKind.Macro:
                     {
-                        int openParen = t.Body.IndexOf('(', StringComparison.Ordinal);
+                        string macroBody = t.Body["macro ".Length..].Trim();
+                        int openParen = macroBody.IndexOf('(', StringComparison.Ordinal);
                         if (openParen < 0)
                             throw new JinjaRenderException($"Malformed macro: {t.Body}");
-                        string name = t.Body[..openParen].Trim();
-                        int closeParen = t.Body.IndexOf(")", openParen, StringComparison.Ordinal);
+                        string name = macroBody[..openParen].Trim();
+                        int closeParen = macroBody.IndexOf(")", openParen, StringComparison.Ordinal);
                         if (closeParen < 0)
                             throw new JinjaRenderException($"Malformed macro: {t.Body}");
-                        var paramNames = t.Body[(openParen + 1)..closeParen]
+                        var paramNames = macroBody[(openParen + 1)..closeParen]
                             .Split(',', StringSplitOptions.RemoveEmptyEntries)
                             .Select(p => p.Trim()).ToList();
 
@@ -462,7 +478,10 @@ internal sealed class JinjaRenderer
                 SkipWs();
                 if (_pos < _src.Length && _src[_pos] == '-' && _pos + 1 < _src.Length &&
                     (char.IsDigit(_src[_pos + 1]) || char.IsLetter(_src[_pos + 1])))
+                {
+                    _pos++; // consume the '-' before recursing
                     return new ArithNode("-", new LiteralNode(0L), ParseUnary());
+                }
                 return ParseFilter();
             }
 
@@ -596,7 +615,7 @@ internal sealed class JinjaRenderer
 
                 var node = (ExprNode)new VarNode(name);
 
-                // Attribute / index access.
+                // Attribute / index / method access.
                 while (_pos < _src.Length)
                 {
                     SkipWs();
@@ -605,15 +624,71 @@ internal sealed class JinjaRenderer
                     {
                         _pos++;
                         string field = ReadName();
-                        node = new AttrNode(node, field);
+                        // Check for method call: .name(
+                        SkipWs();
+                        if (_pos < _src.Length && _src[_pos] == '(')
+                        {
+                            _pos++;
+                            var mArgs = new List<ExprNode>();
+                            while (_pos < _src.Length && _src[_pos] != ')')
+                            {
+                                SkipWs();
+                                mArgs.Add(ParseComparison());
+                                SkipWs();
+                                if (_pos < _src.Length && _src[_pos] == ',') _pos++;
+                                else break;
+                            }
+                            if (_pos < _src.Length) _pos++; // )
+                            node = new MethodCallNode(node, field, mArgs);
+                        }
+                        else
+                        {
+                            node = new AttrNode(node, field);
+                        }
                     }
                     else if (_src[_pos] == '[')
                     {
                         _pos++;
-                        var idx = ParseComparison();
                         SkipWs();
-                        if (_pos < _src.Length && _src[_pos] == ']') _pos++;
-                        node = new IndexNode(node, idx);
+                        // Check for slice: [:N], [N:], [A:B]
+                        if (_pos < _src.Length && _src[_pos] == ':')
+                        {
+                            // [:N] or [:]
+                            _pos++;
+                            SkipWs();
+                            ExprNode? upper;
+                            if (_pos < _src.Length && _src[_pos] != ']')
+                                upper = ParseComparison();
+                            else
+                                upper = null;
+                            SkipWs();
+                            if (_pos < _src.Length && _src[_pos] == ']') _pos++;
+                            node = new SliceNode(node, null, upper);
+                        }
+                        else
+                        {
+                            var lower = ParseComparison();
+                            SkipWs();
+                            if (_pos < _src.Length && _src[_pos] == ':')
+                            {
+                                // [N:] or [A:B]
+                                _pos++;
+                                SkipWs();
+                                ExprNode? upper;
+                                if (_pos < _src.Length && _src[_pos] != ']')
+                                    upper = ParseComparison();
+                                else
+                                    upper = null;
+                                SkipWs();
+                                if (_pos < _src.Length && _src[_pos] == ']') _pos++;
+                                node = new SliceNode(node, lower, upper);
+                            }
+                            else
+                            {
+                                if (_pos < _src.Length && _src[_pos] == ']') _pos++;
+                                node = new IndexNode(node, lower);
+                            }
+                        }
                     }
                     else break;
                 }
@@ -744,8 +819,27 @@ internal sealed class JinjaRenderer
                     sb.Append(ToString(EvalExpr(o.Expr)));
                     break;
                 case SetNode s:
-                    _scope[s.Name] = EvalExpr(s.Value);
+                {
+                    if (s.Name.Contains('.'))
+                    {
+                        // Dotted assignment: ns.field = value
+                        var parts = s.Name.Split('.');
+                        object? target = _scope.TryGetValue(parts[0], out var t) ? t : null;
+                        for (int i = 1; i < parts.Length - 1 && target is Dictionary<string, object?> d; i++)
+                        {
+                            if (!d.TryGetValue(parts[i], out var next))
+                                throw new JinjaRenderException($"Cannot set '{s.Name}' — intermediate key '{parts[i]}' not found.");
+                            target = next;
+                        }
+                        if (target is Dictionary<string, object?> td)
+                            td[parts[^1]] = EvalExpr(s.Value);
+                    }
+                    else
+                    {
+                        _scope[s.Name] = EvalExpr(s.Value);
+                    }
                     break;
+                }
                 case BlockSetNode bs:
                 {
                     var sbInner = new StringBuilder();
@@ -755,6 +849,8 @@ internal sealed class JinjaRenderer
                 }
                 case MacroDefNode m:
                     _macros[m.Name] = m;
+                    break;
+                case NoOpNode:
                     break;
                 case IfNode i:
                     foreach (var (cond, body) in i.Branches)
@@ -778,6 +874,7 @@ internal sealed class JinjaRenderer
                             _scope["loop"] = new Dictionary<string, object?>
                             {
                                 ["index"] = (long)(i + 1),
+                                ["index0"] = (long)i,
                                 ["first"] = i == 0,
                                 ["last"] = i == items.Count - 1,
                                 ["length"] = (long)items.Count,
@@ -809,7 +906,39 @@ internal sealed class JinjaRenderer
                         return lst[(int)li];
                     if (t is Dictionary<string, object?> d && idx is string s && d.TryGetValue(s, out var dv))
                         return dv;
+                    // Negative indexing
+                    if (t is List<object?> nlst && idx is long nli && nli < 0)
+                    {
+                        int adjusted = nlst.Count + (int)nli;
+                        return adjusted >= 0 && adjusted < nlst.Count ? nlst[adjusted] : null;
+                    }
+                    if (t is string ns && idx is long nsi && nsi < 0)
+                    {
+                        int adj = ns.Length + (int)nsi;
+                        return adj >= 0 && adj < ns.Length ? ns[adj].ToString() : null;
+                    }
                     return null;
+                case SliceNode sl:
+                {
+                    var target = EvalExpr(sl.Target);
+                    long lo = sl.Lower == null ? 0 : (long)(EvalExpr(sl.Lower) is long lv ? lv : 0);
+                    long hi = sl.Upper == null ? long.MaxValue : (long)(EvalExpr(sl.Upper) is long hv ? hv : long.MaxValue);
+                    if (target is string str)
+                    {
+                        lo = Math.Max(0, lo);
+                        hi = Math.Min(str.Length, hi);
+                        return lo < hi ? str.Substring((int)lo, (int)(hi - lo)) : "";
+                    }
+                    if (target is List<object?> list)
+                    {
+                        lo = Math.Max(0, lo);
+                        hi = Math.Min(list.Count, hi);
+                        var result = new List<object?>();
+                        for (int i = (int)lo; i < (int)hi; i++) result.Add(list[i]);
+                        return result;
+                    }
+                    return target;
+                }
                 case CompareNode c:
                     return CompareOp(c.Left, c.Op, c.Right);
                 case ArithNode ar:
@@ -834,6 +963,8 @@ internal sealed class JinjaRenderer
                         return ss.Contains(vs, StringComparison.Ordinal);
                     if (seq is List<object?> list)
                         return list.Any(x => ValuesEqual(x, value));
+                    if (seq is Dictionary<string, object?> d2 && value is string ks)
+                        return d2.ContainsKey(ks);
                     return false;
                 }
                 case ConditionalNode cond:
@@ -846,7 +977,7 @@ internal sealed class JinjaRenderer
                         "boolean" or "bool" => iv is bool,
                         "none" or "null" => iv is null,
                         "mapping" => iv is Dictionary<string, object?>,
-                        "sequence" => iv is List<object?>,
+                        "sequence" or "iterable" => iv is List<object?> || iv is string,
                         "number" => iv is long or double,
                         "integer" or "int" => iv is long,
                         "float" => iv is double,
@@ -855,11 +986,20 @@ internal sealed class JinjaRenderer
                     return isN.Negated ? !testResult : testResult;
                 case FilterNode f:
                     return ApplyFilter(f, EvalExpr(f.Input));
+                case MethodCallNode mc:
+                    return InvokeMethod(mc, EvalExpr(mc.Target));
                 case CallNode call:
                     if (call.Target is VarNode cv)
                     {
                         if (cv.Name == "range")
                             return RangeCall(call.Args);
+                        if (cv.Name == "namespace")
+                            return NamespaceCall(call.Args);
+                        if (cv.Name == "raise_exception")
+                        {
+                            string msg = call.Args.Count > 0 ? ToString(EvalExpr(call.Args[0])) : "";
+                            throw new JinjaRenderException($"raise_exception: {msg}");
+                        }
                         if (_macros.TryGetValue(cv.Name, out var macro))
                         {
                             var savedScope = new Dictionary<string, object?>(_scope);
@@ -885,6 +1025,56 @@ internal sealed class JinjaRenderer
                     throw new JinjaRenderException($"Unsupported call: {call.Target}");
             }
             throw new JinjaRenderException($"Unsupported expression node: {node.GetType().Name}");
+        }
+
+        private object? InvokeMethod(MethodCallNode mc, object? target)
+        {
+            switch (mc.Method)
+            {
+                case "get" when target is Dictionary<string, object?> dict:
+                {
+                    string key = mc.Args.Count > 0 ? ToString(EvalExpr(mc.Args[0])) : "";
+                    return dict.TryGetValue(key, out var v) ? v : (mc.Args.Count > 1 ? EvalExpr(mc.Args[1]) : null);
+                }
+                case "split" when target is string s:
+                {
+                    string sep = mc.Args.Count > 0 ? ToString(EvalExpr(mc.Args[0])) : " ";
+                    return s.Split(new[] { sep }, StringSplitOptions.None).Cast<object?>().ToList();
+                }
+                case "endswith" when target is string se:
+                    return se.EndsWith(ToString(mc.Args.Count > 0 ? EvalExpr(mc.Args[0]) : null), StringComparison.Ordinal);
+                case "startswith" when target is string ss:
+                    return ss.StartsWith(ToString(mc.Args.Count > 0 ? EvalExpr(mc.Args[0]) : null), StringComparison.Ordinal);
+                case "items" when target is Dictionary<string, object?> d:
+                {
+                    var list = new List<object?>();
+                    foreach (var kv in d)
+                        list.Add(new[] { (object?)kv.Key, kv.Value });
+                    return list;
+                }
+                case "strip" when target is string st:
+                    return st.Trim();
+                case "join" when target is List<object?> jl:
+                    string jsep = mc.Args.Count > 0 ? ToString(EvalExpr(mc.Args[0])) : "";
+                    return string.Join(jsep, jl.Select(ToString));
+                case "append" when target is List<object?> al:
+                    var copy = new List<object?>(al);
+                    if (mc.Args.Count > 0) copy.Add(EvalExpr(mc.Args[0]));
+                    return copy;
+                default:
+                    return null;
+            }
+        }
+
+        private object? NamespaceCall(List<ExprNode> args)
+        {
+            var ns = new Dictionary<string, object?>();
+            foreach (var arg in args)
+            {
+                if (arg is KeywordArgNode kw)
+                    ns[kw.Name] = EvalExpr(kw.Value);
+            }
+            return ns;
         }
 
         private object? CompareOp(ExprNode left, string op, ExprNode right)
@@ -1014,6 +1204,9 @@ internal sealed class JinjaRenderer
                 "join" => JoinFilter(input, node.Args),
                 "list" => input is List<object?> l ? l : new List<object?> { input },
                 "map" => MapFilter(input, node.Args),
+                "replace" => input is string sr && node.Args.Count >= 2
+                    ? sr.Replace(ToString(EvalExpr(node.Args[0])), ToString(EvalExpr(node.Args[1])))
+                    : input,
                 _ => throw new JinjaRenderException($"Unsupported filter: {node.Name}"),
             };
         }
