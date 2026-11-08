@@ -1,0 +1,1 @@
+{% if a and b %}both{% elif a or b %}one{% else %}none{% endif %}

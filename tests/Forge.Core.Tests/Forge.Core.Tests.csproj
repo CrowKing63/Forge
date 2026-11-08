@@ -17,4 +17,8 @@
     <ProjectReference Include="..\..\src\Forge.Core\Forge.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="JinjaRefs\**\*.*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

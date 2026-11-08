@@ -7,7 +7,7 @@ using Forge.Core;
 const string defaultModel = @"C:\Users\uitaek\.cache\huggingface\hub\models--unsloth--gemma-4-E2B-it-qat-GGUF\snapshots\66a399f68ddd113b06dff02fca9523e55465d11d\gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf";
 
 // Suppress llama.cpp's native console log (S0/S1 harness noise) — M1 output must stay clean.
-LLama.Native.NativeLogConfig.llama_log_set(Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+LlamaNative.SuppressConsoleLog();
 Console.OutputEncoding = System.Text.Encoding.UTF8; // Korean output stays readable in any terminal / redirect
 
 // ---- args ----
@@ -54,7 +54,7 @@ try
 {
     engine.LoadModel(path);
 }
-catch (LLama.Exceptions.LoadWeightsFailedException ex)
+catch (IOException ex)
 {
     Console.Error.WriteLine($"[load] {ex.Message}");
     Console.Error.WriteLine("[load] The bundled llama.cpp runtime does not support this model's architecture.");
@@ -89,9 +89,9 @@ string preview = string.Join(' ', selected.Split('\r', '\n')).Trim();
 if (preview.Length > 100) preview = preview[..100] + "…";
 Console.WriteLine($"[capture] {selected.Length} chars / {inputTokens} tokens: \"{preview}\"");
 
-// ---- prompt assembly (S3, S16: single translate prompt) ----
+// ---- prompt assembly (S3, S16: single translate prompt; S21: two-tier) ----
 var family = ModelProfile.Detect(path);
-string prompt = PromptBuilder.Build(selected, family);
+string prompt = ChatPromptBuilder.Build(selected, family, engine.ChatTemplate);
 
 // ---- output budget: exact context size minus the exact prompt size, with a margin ----
 int promptTokens = engine.CountTokens(prompt);

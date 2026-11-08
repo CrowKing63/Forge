@@ -7,8 +7,8 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
-  <!-- Native llama/ggml DLLs are copied from Forge.Core (which pins the LLamaSharp
-       Backend.Cpu runtime path) and flow through this ProjectReference. -->
+  <!-- Native llama/ggml DLLs are copied from Forge.Core (which pins the self-built
+       llama.cpp runtime, S21) and flow through this ProjectReference. -->
   <ItemGroup>
     <ProjectReference Include="..\Forge.Core\Forge.Core.csproj" />
   </ItemGroup>

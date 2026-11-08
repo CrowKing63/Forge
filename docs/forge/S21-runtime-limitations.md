@@ -94,3 +94,17 @@ raw FFI 하네스(`scratch/ffi-proto`, ~300줄 C#)로 전 경로 검증:
   규명. 수동 추가 개념 제거(카탈로그 전용) — `87e037e`.
 - 2026-11-08: FFI 프로토타입 완료 — P/Invoke 전 경로 검증 성공, 템플릿
   충실성 한계(C API jinja 부재) 규명. Option 2 채택 근거 확보.
+- 2026-11-08: `InferenceEngine` 스왑 완료 (LLamaSharp → 자체 FFI).
+  구현 중 발견·수정 사항:
+  - **백엔드 레지스트리 분리**: llama.dll은 ggml을 static 링크하여 독립
+    백엔드 레지스트리를 가진다. ggml.dll을 통해 `ggml_backend_load_all_from_path`
+   를 호출하면 llama_model_load이 보지 못하는 별도 인스턴스에 로드됨 →
+    `llama_backend_init()`을 llama.dll을 통해 호출 + CWD를 RuntimeDir으로
+    일시 전환하여 내부 `ggml_backend_load_all()`이 번들 DLL을 찾게 함.
+  - **`llama_memory_clear` 시그니처**: `(llama_memory_t mem, bool data)` —
+    컨텍트 포인터가 아닌 memory 객체를 받음. `llama_get_memory(ctx)`로
+    추출 후 호출.
+  - **엔드투엔드 검증**: LFM3-1.7B-QAD — 모델 로드·토큰화(3 tokens)·
+    디코드·생성(64 tokens)·언로드 전 경로 성공. Gemma 4 E2B — 로드·
+    토큰화 성공, 0-token 출력 (프롬프트 포맷 불일치 — Jinja 템플릿
+    렌더링 부재, two-tier 태스크 범위).

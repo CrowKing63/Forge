@@ -209,7 +209,7 @@ public partial class App : Application, IOnboardingHost
 
             // 2. Inference (S16: single prompt — translate to English).
             var family = ModelProfile.Detect(_modelPath);
-            var prompt = PromptBuilder.Build(selected, family);
+            var prompt = ChatPromptBuilder.Build(selected, family, engine.ChatTemplate);
             var promptTokens = engine.CountTokens(prompt);
             var maxTokens = ModelProfile.MaxOutputTokens(family, Math.Max(16, engine.ContextSize - promptTokens - 256));
             DebugLog.Write($"direct translate: inference started ({promptTokens} prompt tokens)");

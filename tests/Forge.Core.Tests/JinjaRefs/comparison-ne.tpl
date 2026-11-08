@@ -1,0 +1,1 @@
+{% if a != b %}diff{% else %}equal{% endif %}

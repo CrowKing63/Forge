@@ -1,4 +1,4 @@
-using LLama.Native;
+using System.Runtime.InteropServices;
 
 namespace Forge.Core;
 
@@ -8,7 +8,7 @@ namespace Forge.Core;
 /// <param name="GpuUsable">True when a GPU backend is usable for layer offload in this build.</param>
 /// <param name="GpuName">GPU display name (e.g. "NVIDIA GeForce RTX 5070 Ti"); null when unknown.</param>
 /// <param name="VramMb">Total VRAM in MB; 0 when unknown.</param>
-/// <param name="CudaMajorVersion">CUDA toolkit major version detected by LLamaSharp; -1 when absent.</param>
+/// <param name="CudaMajorVersion">-1 when not queried (the FFI build does not read the CUDA toolkit version; the authoritative signal is <see cref="GpuUsable"/>).</param>
 /// <param name="VulkanVersion">Vulkan loader version; null when absent. Informational only — Forge does not bundle a Vulkan runtime.</param>
 /// <param name="Note">Human-readable status for logs and the settings surface.</param>
 public sealed record HardwareInfo(
@@ -26,58 +26,40 @@ public sealed record HardwareInfo(
 /// is best-effort by design — every probe is wrapped so a missing driver, toolkit, or native
 /// library yields "no usable GPU" instead of a crash.
 ///
-/// LLamaSharp locks its native runtime selection on the first native call in a process, so
-/// <see cref="Detect"/> must run before any model load (the app calls it once at startup).
+/// Detection loads all ggml backends (via <see cref="LlamaNative.EnsureBackendsLoaded"/>) and
+/// then enumerates the devices they expose, so it must run before any model load — the app
+/// calls it once at startup.
 /// </summary>
 public static class HardwareDetector
 {
     /// <summary>
-    /// Probes the machine: OS-level GPU name + VRAM (nvidia-smi), CUDA/Vulkan availability
-    /// (LLamaSharp <see cref="SystemInfo"/>), and — authoritatively — whether the loaded
-    /// runtime exposes a non-CPU device. Never throws.
+    /// Probes the machine: OS-level GPU name + VRAM (nvidia-smi), and — authoritatively —
+    /// whether the loaded runtime exposes a non-CPU device. Never throws.
     /// </summary>
     public static HardwareInfo Detect()
     {
         var (gpuName, vramMb) = TryQueryNvidiaSmi();
 
-        // Configure the probe intent BEFORE any native call: LLamaSharp locks the runtime
-        // selection when the first native library loads. If detection runs after a load
-        // (e.g. the settings window), the selection is already fixed and only re-queried.
-        // Prefer CUDA, then Vulkan; the CPU build stays as the fallback so a machine with no
-        // usable GPU backend keeps a working runtime for later CPU loads.
-        if (!NativeLibraryConfig.LLama.LibraryHasLoaded)
-            NativeLibraryConfig.All.WithCuda(true).WithVulkan(true);
-
-        int cudaMajor = -1;
-        string? vulkanVersion = null;
-        try
-        {
-            var sys = SystemInfo.Get();
-            cudaMajor = sys.CudaMajorVersion;
-            vulkanVersion = sys.VulkanVersion;
-        }
-        catch (Exception)
-        {
-            // Unsupported platform or native failure — treat as no CUDA.
-        }
+        // Load every available backend (CPU always; CUDA when the toolkit is present).
+        LlamaNative.EnsureBackendsLoaded();
 
         // Authoritative check: does the loaded runtime actually expose a non-CPU device?
-        // (A CUDA build without its toolkit, or a Vulkan build without a driver, fails to
-        // load and falls back to the CPU build, which reports no offload support.)
+        // (A CUDA build without its toolkit, or a missing driver, simply does not load.)
         bool gpuDevicePresent = false;
+        string? backendName = null;
         try
         {
-            if (NativeApi.llama_supports_gpu_offload())
+            if (LlamaNative.LlamaSupportsGpuOffload())
             {
-                int count = (int)NativeApi.ggml_backend_dev_count();
+                int count = (int)LlamaNative.GgmlBackendDevCount();
                 for (int i = 0; i < count; i++)
                 {
-                    var dev = NativeApi.ggml_backend_dev_get((UIntPtr)i);
-                    string? name = System.Runtime.InteropServices.Marshal.PtrToStringUTF8(
-                        NativeApi.ggml_backend_dev_name(dev));
+                    var dev = LlamaNative.GgmlBackendDevGet((ulong)i);
+                    string? name = Marshal.PtrToStringUTF8(LlamaNative.GgmlBackendDevName(dev));
                     if (!string.Equals(name, "CPU", StringComparison.OrdinalIgnoreCase))
                     {
                         gpuDevicePresent = true;
+                        backendName = name;
                         break;
                     }
                 }
@@ -88,27 +70,13 @@ public static class HardwareDetector
             // Native backend failed to initialize — treat as no usable GPU.
         }
 
-        string? backend = null;
-        if (gpuDevicePresent)
-        {
-            try
-            {
-                // Reports which backend LLamaSharp selected (informational for the note).
-                if (NativeLibraryConfig.All.DryRun(out var lib, out _))
-                    backend = lib?.Metadata?.UseCuda == true ? "CUDA"
-                        : lib?.Metadata?.UseVulkan == true ? "Vulkan"
-                        : null;
-            }
-            catch (Exception) { }
-        }
-
         string note = gpuDevicePresent
-            ? $"GPU usable: {gpuName ?? "unknown GPU"}{(vramMb > 0 ? $" ({vramMb} MB VRAM)" : "")} via {backend ?? "GPU backend"}"
+            ? $"GPU usable: {gpuName ?? "unknown GPU"}{(vramMb > 0 ? $", {vramMb} MB VRAM" : "")} via {backendName}"
             : gpuName is not null
                 ? $"GPU present ({gpuName}{(vramMb > 0 ? $", {vramMb} MB VRAM" : "")}) but no usable GPU backend in this build — CPU fallback"
                 : "No GPU detected — CPU only";
 
-        return new HardwareInfo(gpuDevicePresent, gpuName, vramMb, cudaMajor, vulkanVersion, note);
+        return new HardwareInfo(gpuDevicePresent, gpuName, vramMb, CudaMajorVersion: -1, VulkanVersion: null, note);
     }
 
     /// <summary>

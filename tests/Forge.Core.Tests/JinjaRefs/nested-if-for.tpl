@@ -1,0 +1,1 @@
+{% for row in rows %}{% if row.on %}{{ row.label }}:{% endif %}{% endfor %}

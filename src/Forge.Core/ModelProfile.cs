@@ -12,6 +12,9 @@ public enum ModelFamily
 
     /// <summary>Tencent Hy-MT2 — translation-specialized; &lt;|hy_...&gt; marker format (S15).</summary>
     HyMt2,
+
+    /// <summary>Liquid LFM3 — multimodal MT model; uses embedded Jinja chat template.</summary>
+    Lfm3,
 }
 
 /// <summary>
@@ -21,10 +24,15 @@ public enum ModelFamily
 public static class ModelProfile
 {
     /// <summary>Maps a model file path to its <see cref="ModelFamily"/> by file name.</summary>
-    public static ModelFamily Detect(string modelPath) =>
-        Path.GetFileName(modelPath).Contains("Hy-MT2", StringComparison.OrdinalIgnoreCase)
-            ? ModelFamily.HyMt2
-            : ModelFamily.Gemma4;
+    public static ModelFamily Detect(string modelPath)
+    {
+        string name = Path.GetFileName(modelPath);
+        if (name.Contains("Hy-MT2", StringComparison.OrdinalIgnoreCase))
+            return ModelFamily.HyMt2;
+        if (name.Contains("LFM3", StringComparison.OrdinalIgnoreCase))
+            return ModelFamily.Lfm3;
+        return ModelFamily.Gemma4;
+    }
 
     /// <summary>
     /// Caps the output budget for a family (S15: Hy-MT2 can run away when its stop token

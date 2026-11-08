@@ -5,46 +5,38 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <!-- Pinned llama.cpp build (S21): the exact tree Forge's FFI layer was verified
+       against. Override LlamaRuntimeDir to point at a different build; the copy
+       targets below are no-ops when the directory is absent, so CI without the
+       local build still compiles (the app then fails at runtime with a clear
+       message from LlamaNative.ResolveRuntimeDir). -->
+  <PropertyGroup>
+    <LlamaRuntimeDir Condition="'$(LlamaRuntimeDir)' == ''">C:\Users\uitaek\.unsloth\llama.cpp\build\bin\Release</LlamaRuntimeDir>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="LLamaSharp" Version="0.30.0" />
-    <PackageReference Include="LLamaSharp.Backend.Cpu" Version="0.30.0" />
-    <!-- S8: CUDA runtime for GPU layer offload. Its build props auto-copy the cuda12 native
-         DLLs to runtimes/win-x64/native/cuda12/; selection between CPU and CUDA happens at
-         runtime via LLamaSharp's NativeLibraryConfig (see InferenceEngine / HardwareDetector).
-         Note: the CUDA builds require the matching CUDA toolkit to be installed on the
-         machine; without it, the Vulkan backend below is the usable GPU path. -->
-    <PackageReference Include="LLamaSharp.Backend.Cuda12" Version="0.30.0" />
-    <!-- S8: Vulkan runtime for GPU layer offload (works with the GPU driver alone, no CUDA
-         toolkit needed). Auto-copies to runtimes/win-x64/native/vulkan/. -->
-    <PackageReference Include="LLamaSharp.Backend.Vulkan.Windows" Version="0.30.0" />
     <!-- DiffPlex: pure-managed diff engine behind DiffRenderer (S7 result editor). -->
     <PackageReference Include="DiffPlex" Version="1.1.0" />
   </ItemGroup>
 
-  <!-- LLamaSharp.Backend.Cpu ships native DLLs under a non-standard folder
-       (LLamaSharpRuntimes/...) with no auto-copy targets, so copy them explicitly.
-       from the NuGet package cache ($(NuGetPackageRoot)) so the same paths work on
-       any machine, including CI runners. -->
   <ItemGroup>
-    <None Include="$(NuGetPackageRoot)\llamasharp.backend.cpu\0.30.0\LLamaSharpRuntimes\win-x64\native\avx2\llama.dll" Link="llama.dll" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="$(NuGetPackageRoot)\llamasharp.backend.cpu\0.30.0\LLamaSharpRuntimes\win-x64\native\avx2\ggml.dll" Link="ggml.dll" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="$(NuGetPackageRoot)\llamasharp.backend.cpu\0.30.0\LLamaSharpRuntimes\win-x64\native\avx2\ggml-base.dll" Link="ggml-base.dll" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="$(NuGetPackageRoot)\llamasharp.backend.cpu\0.30.0\LLamaSharpRuntimes\win-x64\native\avx2\ggml-cpu.dll" Link="ggml-cpu.dll" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="$(NuGetPackageRoot)\llamasharp.backend.cpu\0.30.0\LLamaSharpRuntimes\win-x64\native\avx2\mtmd.dll" Link="mtmd.dll" CopyToOutputDirectory="PreserveNewest" />
+    <InternalsVisibleTo Include="Forge.Cli" />
+    <InternalsVisibleTo Include="Forge.App" />
   </ItemGroup>
 
-  <!-- Single-file publish: the LLamaSharp backend packages (Cpu, Cuda12 -> Cuda12.Linux)
-       ship native assets for every RID and their build props copy ALL of them into the
-       output as Content items (linked under runtimes/). Bundle only the win-x64 set so
-       the portable exe stays small — drop the linux/osx/android assets. -->
+  <!-- Native runtime DLLs from the pinned llama.cpp build, copied next to the
+       executable so LlamaNative's DllImport resolves them (portable zip bundles
+       the same set; see S21). The architecture-specific ggml-cpu-*.dll backends
+       are all copied: ggml_backend_load_all picks the best one for the host CPU. -->
   <ItemGroup>
-    <Content Remove="$(NuGetPackageRoot)llamasharp.backend.cpu\0.30.0\LLamaSharpRuntimes\linux*\**" />
-    <Content Remove="$(NuGetPackageRoot)llamasharp.backend.cpu\0.30.0\LLamaSharpRuntimes\osx*\**" />
-    <Content Remove="$(NuGetPackageRoot)llamasharp.backend.cpu\0.30.0\LLamaSharpRuntimes\android*\**" />
-    <Content Remove="$(NuGetPackageRoot)llamasharp.backend.cuda12.linux\0.30.0\LLamaSharpRuntimes\linux*\**" />
-    <Content Remove="$(NuGetPackageRoot)llamasharp.backend.cuda12.linux\0.30.0\LLamaSharpRuntimes\osx*\**" />
+    <None Include="$(LlamaRuntimeDir)\llama.dll" Link="llama.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('$(LlamaRuntimeDir)\llama.dll')" />
+    <None Include="$(LlamaRuntimeDir)\ggml.dll" Link="ggml.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('$(LlamaRuntimeDir)\ggml.dll')" />
+    <None Include="$(LlamaRuntimeDir)\ggml-base.dll" Link="ggml-base.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('$(LlamaRuntimeDir)\ggml-base.dll')" />
+    <None Include="$(LlamaRuntimeDir)\ggml-cpu-*.dll" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(LlamaRuntimeDir)\ggml-cuda.dll" Link="ggml-cuda.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('$(LlamaRuntimeDir)\ggml-cuda.dll')" />
   </ItemGroup>
 
 </Project>

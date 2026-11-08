@@ -38,12 +38,33 @@ public class OutputPostProcessorTests
         Assert.Equal(raw, OutputPostProcessor.Clean(raw, ModelFamily.HyMt2));
     }
 
-    // ---- Clean: Gemma 4 is untouched ----
+    // ---- Clean: Gemma 4 channel stripping ----
 
     [Fact]
-    public void Clean_Gemma4_PassesThrough()
+    public void Clean_Gemma4_NoChannel_PassesThrough()
     {
         const string raw = "Today the weather is nice.";
         Assert.Equal(raw, OutputPostProcessor.Clean(raw, ModelFamily.Gemma4));
+    }
+
+    [Fact]
+    public void Clean_Gemma4_StripsThoughtChannel()
+    {
+        const string raw = "<|channel>thought\nThe user wants a translation.\n<channel|>Hello world.";
+        Assert.Equal("Hello world.", OutputPostProcessor.Clean(raw, ModelFamily.Gemma4));
+    }
+
+    [Fact]
+    public void Clean_Gemma4_StripsMultipleChannels()
+    {
+        const string raw = "<|channel>thought\nLet me think...\n<channel|>First part<|channel>thought\nMore thinking\n<channel|>Second part";
+        Assert.Equal("First partSecond part", OutputPostProcessor.Clean(raw, ModelFamily.Gemma4));
+    }
+
+    [Fact]
+    public void Clean_Gemma4_UnmatchedOpener_KeepsRest()
+    {
+        const string raw = "<|channel>thought\ntruncated output";
+        Assert.Equal("truncated output", OutputPostProcessor.Clean(raw, ModelFamily.Gemma4));
     }
 }

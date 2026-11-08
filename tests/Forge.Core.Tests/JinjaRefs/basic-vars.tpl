@@ -1,0 +1,1 @@
+Hello {{ name }}, you have {{ count }} items.
