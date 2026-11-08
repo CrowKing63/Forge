@@ -25,12 +25,13 @@ jobs:
       - name: Download llama.cpp source
         shell: pwsh
         run: |
-          $url = "https://github.com/ggml-org/llama.cpp/archive/$${env:LLAMA_CPP_REF}.tar.gz"
-          curl.exe -L -o llama-src.tar.gz "$url"
+          $sha = "${env:LLAMA_CPP_REF}"
+          curl.exe -L -o llama-src.tar.gz "https://github.com/ggml-org/llama.cpp/archive/$sha.tar.gz"
           tar -xzf llama-src.tar.gz
-          # The extracted folder name includes the SHA
-          $dir = Get-ChildItem -Directory | Where-Object { $_.Name -like "llama.cpp-*" } | Select-Object -First 1
-          Move-Item $dir.FullName llama.cpp
+          # Extracted folder is llama.cpp-<sha>
+          $src = "llama.cpp-$sha"
+          if (-not (Test-Path $src)) { Write-Error "Extracted dir not found: $src"; exit 1 }
+          Move-Item $src llama.cpp
 
       - name: Build llama.cpp (Vulkan + CPU)
         shell: pwsh
