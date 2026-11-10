@@ -24,7 +24,7 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/ggml-org/llama.cpp.git llama-build
           cd llama-build
-          cmake -B build -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=OFF -DGGML_VULKAN=OFF
+          cmake -B build -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=OFF -DGGML_VULKAN=OFF -DBUILD_SHARED_LIBS=ON
           cmake --build build --config Release --target llama ggml-base ggml
           # Ninja output layout: build/bin/ (not build/bin/Release/ like the VS generator)
           $dllDir = Get-ChildItem build -Recurse -Filter *.dll | Select-Object -First 1 | ForEach-Object { $_.DirectoryName }
