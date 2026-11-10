@@ -19,18 +19,19 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Build llama.cpp (pinned e71c8f673)
+      - name: Build llama.cpp (upstream, CPU-only)
         shell: pwsh
         run: |
-          git clone --filter=blob:none https://github.com/ggml-org/llama.cpp.git llama-build
+          git clone --depth 1 https://github.com/ggml-org/llama.cpp.git llama-build
           cd llama-build
-          git fetch origin e71c8f673
-          git checkout e71c8f673
-          cmake -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=OFF
+          cmake -B build -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=OFF -DGGML_VULKAN=OFF
           cmake --build build --config Release --target llama ggml-base ggml
-          New-Item -ItemType Directory -Path native-dlls | Out-Null
-          Copy-Item build/bin/Release/*.dll native-dlls/
-          Write-Host "Built $(Get-ChildItem native-dlls/*.dll | Measure-Object).Count native DLLs"
+          # Ninja output layout: build/bin/ (not build/bin/Release/ like the VS generator)
+          $dllDir = Get-ChildItem build -Recurse -Filter *.dll | Select-Object -First 1 | ForEach-Object { $_.DirectoryName }
+          Write-Host "DLL directory: $dllDir"
+          New-Item -ItemType Directory -Path ../native-dlls | Out-Null
+          Copy-Item "$dllDir"/*.dll ../native-dlls/
+          Write-Host "Built $(Get-ChildItem ../native-dlls/*.dll | Measure-Object).Count native DLLs"
 
       - name: Publish (self-contained, single file)
         shell: pwsh
