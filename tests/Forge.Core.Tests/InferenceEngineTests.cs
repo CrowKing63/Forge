@@ -15,17 +15,10 @@ public class InferenceEngineTests
     }
 
     [Fact]
-    public void Constructor_RejectsNegativeGpuLayerCount()
-    {
-        Assert.Throws<ArgumentOutOfRangeException>(() => new InferenceEngine(gpuLayerCount: -1));
-    }
-
-    [Fact]
     public void Constructor_DefaultsAreCpuFirst()
     {
         var engine = new InferenceEngine();
         Assert.Equal(8192, engine.ContextSize);
-        Assert.Equal(0, engine.GpuLayerCount);
         Assert.False(engine.IsLoaded);
     }
 

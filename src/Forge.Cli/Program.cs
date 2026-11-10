@@ -1,7 +1,7 @@
 using Forge.Core;
 
 // S16 console E2E (M1): clipboard text -> PromptBuilder -> InferenceEngine (streaming) -> ResultParser.
-// Usage: dotnet run -- [--model <path>] [--gpu] [--detect]
+// Usage: dotnet run -- [--model <path>]
 // Exit codes: 0 = success, 1 = pipeline failure, 2 = usage error.
 
 const string defaultModel = @"C:\Users\uitaek\.cache\huggingface\hub\models--unsloth--gemma-4-E2B-it-qat-GGUF\snapshots\66a399f68ddd113b06dff02fca9523e55465d11d\gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf";
@@ -12,43 +12,26 @@ Console.OutputEncoding = System.Text.Encoding.UTF8; // Korean output stays reada
 
 // ---- args ----
 string? modelPath = null;
-bool wantGpu = false;
-bool detectOnly = false;
 for (int i = 0; i < args.Length; i++)
 {
     if (args[i] == "--model")
     {
         if (i + 1 >= args.Length)
         {
-            Console.Error.WriteLine("Usage: forge [--model <path>] [--gpu] [--detect]");
+            Console.Error.WriteLine("Usage: forge [--model <path>]");
             return 2;
         }
         modelPath = args[++i];
         continue;
     }
-    if (args[i] == "--gpu") { wantGpu = true; continue; }
-    if (args[i] == "--detect") { detectOnly = true; continue; }
 
-    Console.Error.WriteLine($"Unknown argument '{args[i]}'. Usage: forge [--model <path>] [--gpu] [--detect]");
+    Console.Error.WriteLine($"Unknown argument '{args[i]}'. Usage: forge [--model <path>]");
     return 2;
 }
 
-// ---- S8 hardware detection ----
 string path = modelPath ?? defaultModel;
-HardwareInfo hardware = HardwareDetector.Detect();
-long modelSize = 0;
-if (File.Exists(path)) modelSize = new FileInfo(path).Length;
-int gpuLayers = wantGpu ? HardwareDetector.RecommendGpuLayerCount(hardware, modelSize) : 0;
-
-if (detectOnly)
-{
-    Console.WriteLine($"[hardware] {hardware.Note}");
-    Console.WriteLine($"[hardware] CUDA major: {hardware.CudaMajorVersion}; Vulkan: {hardware.VulkanVersion ?? "none"}; VRAM: {(hardware.VramMb > 0 ? hardware.VramMb + " MB" : "unknown")}");
-    Console.WriteLine($"[hardware] recommended GpuLayerCount: {gpuLayers}");
-    return 0;
-}
-Console.WriteLine($"[load] {path} (gpu layers: {gpuLayers})");
-var engine = new InferenceEngine(contextSize: 8192, gpuLayerCount: gpuLayers);
+Console.WriteLine($"[load] {path} (CPU)");
+var engine = new InferenceEngine(contextSize: 8192);
 var swLoad = System.Diagnostics.Stopwatch.StartNew();
 try
 {
@@ -66,8 +49,6 @@ catch (Exception ex) when (ex is FileNotFoundException or ArgumentException)
     return 1;
 }
 swLoad.Stop();
-if (engine.FellBackToCpu)
-    Console.WriteLine("[load] GPU unavailable — fell back to CPU");
 Console.WriteLine($"[load] {swLoad.Elapsed.TotalSeconds:F1}s");
 
 // ---- capture: clipboard text, guarded by the engine's precise tokenizer (S2 + S4) ----

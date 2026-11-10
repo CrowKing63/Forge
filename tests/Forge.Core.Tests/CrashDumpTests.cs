@@ -18,13 +18,12 @@ public class CrashDumpTests : IDisposable
     public void Write_ProducesDiagnosticFile()
     {
         var ex = new InvalidOperationException("boom");
-        string? file = CrashDump.Write(ex, @"C:\models\test.gguf", 99);
+        string? file = CrashDump.Write(ex, @"C:\models\test.gguf");
 
         Assert.NotNull(file);
         string content = File.ReadAllText(file!);
         Assert.Contains("boom", content);
         Assert.Contains(@"C:\models\test.gguf", content);
-        Assert.Contains("gpu layer count: 99", content);
         Assert.Contains("runtime:", content);
         Assert.StartsWith("Forge crash dump — ", content);
     }
@@ -37,7 +36,7 @@ public class CrashDumpTests : IDisposable
         // method signature has no text parameter.)
         const string payload = "SECRET-TEXT-PAYLOAD-12345";
         var ex = new InvalidOperationException("boom");
-        string? file = CrashDump.Write(ex, @"C:\models\test.gguf", 0);
+        string? file = CrashDump.Write(ex, @"C:\models\test.gguf");
 
         Assert.NotNull(file);
         Assert.DoesNotContain(payload, File.ReadAllText(file!));
@@ -47,7 +46,7 @@ public class CrashDumpTests : IDisposable
     public void Write_FileNameCarriesTimestamp()
     {
         var ex = new InvalidOperationException("boom");
-        string? file = CrashDump.Write(ex, "m.gguf", 0);
+        string? file = CrashDump.Write(ex, "m.gguf");
 
         Assert.NotNull(file);
         string name = Path.GetFileName(file!);

@@ -13,7 +13,6 @@ public class ForgeSettingsTests
         var s = ForgeSettings.Load(path);
         Assert.Equal(8192, s.ContextSize);
         Assert.Equal(ModelUnloadAfter.OneMinute, s.UnloadAfter);
-        Assert.Equal(HardwareMode.Cpu, s.Hardware);
     }
 
     [Fact]
@@ -23,13 +22,11 @@ public class ForgeSettingsTests
         var s = ForgeSettings.Load(path);
         s.ContextSize = 4096;
         s.UnloadAfter = ModelUnloadAfter.FiveMinutes;
-        s.Hardware = HardwareMode.Gpu;
         s.Save(path);
 
         var loaded = ForgeSettings.Load(path);
         Assert.Equal(4096, loaded.ContextSize);
         Assert.Equal(ModelUnloadAfter.FiveMinutes, loaded.UnloadAfter);
-        Assert.Equal(HardwareMode.Gpu, loaded.Hardware);
     }
 
     [Fact]

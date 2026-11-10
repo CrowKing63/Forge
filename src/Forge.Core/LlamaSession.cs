@@ -39,7 +39,7 @@ internal sealed class LlamaSession : IDisposable
     private readonly IntPtr _pieceBuf;
     private const int PieceBufSize = 256;
 
-    public LlamaSession(string modelPath, int contextSize, int gpuLayers)
+    public LlamaSession(string modelPath, int contextSize)
     {
         if (string.IsNullOrWhiteSpace(modelPath))
             throw new ArgumentException("Model path must not be empty.", nameof(modelPath));
@@ -47,13 +47,11 @@ internal sealed class LlamaSession : IDisposable
             throw new FileNotFoundException("Model file not found.", modelPath);
         if (contextSize <= 0)
             throw new ArgumentOutOfRangeException(nameof(contextSize), contextSize, "Context size must be positive.");
-        if (gpuLayers < 0)
-            throw new ArgumentOutOfRangeException(nameof(gpuLayers), gpuLayers, "GPU layer count cannot be negative.");
 
         LlamaNative.EnsureBackendsLoaded();
 
         var mp = LlamaNative.llama_model_default_params();
-        mp.n_gpu_layers = gpuLayers;
+        mp.n_gpu_layers = 0; // CPU-only
         _model = LlamaNative.llama_model_load_from_file(Utf8Ptr(modelPath), mp);
         if (_model == IntPtr.Zero)
             throw new IOException($"Failed to load model: {modelPath}");

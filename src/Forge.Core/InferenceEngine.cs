@@ -7,12 +7,10 @@ namespace Forge.Core;
 /// Reusable, on-demand local-LLM inference service over the self-built llama.cpp
 /// native library (see <see cref="LlamaNative"/> and docs/forge/S21-runtime-limitations.md).
 ///
-/// CPU-first: <see cref="GpuLayerCount"/> defaults to 0 (no GPU offload). When a GPU layer
-/// count is requested (S8 detection), the engine attempts a GPU load; if it fails it
-/// falls back to CPU and reports the fallback via <see cref="FellBackToCpu"/>. The engine
-/// owns the model's lifetime — <see cref="LoadModel"/> loads on demand and <see cref="Unload"/>
-/// releases native resources. One <see cref="Complete"/> call runs one inference, streaming
-/// decoded tokens as an <see cref="IAsyncEnumerable{T}"/>.
+/// CPU-only: all inference runs on the CPU. The engine owns the model's lifetime —
+/// <see cref="LoadModel"/> loads on demand and <see cref="Unload"/> releases native
+/// resources. One <see cref="Complete"/> call runs one inference, streaming decoded
+/// tokens as an <see cref="IAsyncEnumerable{T}"/>.
 ///
 /// Prompt assembly is the caller's responsibility (S3 PromptBuilder): this engine feeds
 /// the fully-assembled prompt text to the model. Chat prompts are tokenized with
@@ -28,15 +26,6 @@ public sealed class InferenceEngine : IAsyncDisposable
 
     /// <summary>Context window size in tokens (default 8192).</summary>
     public int ContextSize { get; }
-
-    /// <summary>Number of layers offloaded to GPU. 0 = CPU-only (default).</summary>
-    public int GpuLayerCount { get; }
-
-    /// <summary>Layers actually offloaded after the last load (0 = CPU, including fallback).</summary>
-    public int ActiveGpuLayerCount { get; private set; }
-
-    /// <summary>True when a GPU load was requested but the engine fell back to CPU.</summary>
-    public bool FellBackToCpu => GpuLayerCount > 0 && ActiveGpuLayerCount == 0;
 
     /// <summary>The model's embedded chat template (Jinja), or null if none.</summary>
     public string? ChatTemplate
@@ -62,21 +51,15 @@ public sealed class InferenceEngine : IAsyncDisposable
         get { lock (_gate) { return _session is not null; } }
     }
 
-    public InferenceEngine(int contextSize = 8192, int gpuLayerCount = 0)
+    public InferenceEngine(int contextSize = 8192)
     {
         if (contextSize <= 0) throw new ArgumentOutOfRangeException(nameof(contextSize), contextSize, "Context size must be positive.");
-        if (gpuLayerCount < 0) throw new ArgumentOutOfRangeException(nameof(gpuLayerCount), gpuLayerCount, "GPU layer count cannot be negative.");
         ContextSize = contextSize;
-        GpuLayerCount = gpuLayerCount;
     }
 
     /// <summary>
-    /// Loads the GGUF model at <paramref name="modelPath"/>. Any previously loaded model
-    /// is unloaded first, so this is safe to call repeatedly (reload).
-    ///
-    /// When <see cref="GpuLayerCount"/> &gt; 0 a GPU load is attempted; on failure the
-    /// engine retries on CPU and reports via <see cref="FellBackToCpu"/>. A CUDA-built
-    /// runtime also runs on CPU with 0 layers, so no separate CPU build is needed.
+    /// Loads the GGUF model at <paramref name="modelPath"/> (CPU). Any previously loaded
+    /// model is unloaded first, so this is safe to call repeatedly (reload).
     /// </summary>
     public void LoadModel(string modelPath)
     {
@@ -94,22 +77,7 @@ public sealed class InferenceEngine : IAsyncDisposable
             ModelTier = certified is not null ? ModelTier.Certified : ModelTier.Unauthenticated;
             ModelFamily = ModelProfile.Detect(modelPath);
 
-            if (GpuLayerCount > 0)
-            {
-                try
-                {
-                    _session = new LlamaSession(modelPath, ContextSize, GpuLayerCount);
-                    ActiveGpuLayerCount = GpuLayerCount;
-                    return;
-                }
-                catch (IOException)
-                {
-                    // GPU load failed — fall back to CPU.
-                }
-            }
-
-            _session = new LlamaSession(modelPath, ContextSize, 0);
-            ActiveGpuLayerCount = 0;
+            _session = new LlamaSession(modelPath, ContextSize);
         }
     }
 

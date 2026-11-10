@@ -9,7 +9,7 @@ namespace Forge.Core;
 /// Gemma 4's embedded Jinja chat template.
 ///
 /// The native DLLs are bundled next to the executable (portable zip). Backends
-/// (ggml-cpu, ggml-cuda, ...) are loaded once per process via ggml_backend_load_all
+/// (ggml-cpu) are loaded once per process via ggml_backend_load_all
 /// before any model load. All signatures and struct layouts below were verified
 /// against the llama.h header of the pinned build (e71c8f673) by the FFI prototype.
 /// </summary>
@@ -61,16 +61,9 @@ internal static class LlamaNative
     private static extern IntPtr LoadLibraryEx(string lpFileName, IntPtr hFile, uint dwFlags);
 
     /// <summary>
-    /// Loads all ggml backends (CPU always; CUDA/Vulkan when present in the build).
-    /// Must run before the first model load; safe to call repeatedly.
-    ///
-    /// llama.dll statically links its own copy of ggml, so backends must be loaded
-    /// through llama.dll's registry — calling ggml_backend_load_all_from_path via
-    /// ggml.dll loads them into a separate instance that llama_model_load never sees.
-    /// llama_backend_init() triggers the internal ggml_backend_load_all(), which
-    /// searches the executable directory and CWD; we point CWD at RuntimeDir for
-    /// the duration of the call so the bundled backend DLLs are found no matter
-    /// where the app runs from.
+    /// Initializes the native backend registry once per process, before any model load.
+    /// CPU-only: llama.dll ships its CPU backend compiled in; this call scans for
+    /// optional backend DLLs (none are bundled). Safe to call repeatedly.
     /// </summary>
     public static void EnsureBackendsLoaded()
     {
@@ -78,16 +71,7 @@ internal static class LlamaNative
         lock (InitGate)
         {
             if (_backendsLoaded) return;
-            string origCwd = Directory.GetCurrentDirectory();
-            try
-            {
-                Directory.SetCurrentDirectory(RuntimeDir);
-                llama_backend_init();
-            }
-            finally
-            {
-                Directory.SetCurrentDirectory(origCwd);
-            }
+            llama_backend_init();
             _backendsLoaded = true;
         }
     }
@@ -259,20 +243,6 @@ internal static class LlamaNative
 
     [DllImport(LlamaDllName, CallingConvention = CallingConvention.Cdecl)]
     internal static extern int llama_vocab_bos(IntPtr vocab);
-
-    // ---- hardware probes (used by HardwareDetector) ----
-
-    [DllImport(LlamaDllName, CallingConvention = CallingConvention.Cdecl)]
-    internal static extern bool LlamaSupportsGpuOffload();
-
-    [DllImport(GgmlDllName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ggml_backend_dev_count")]
-    internal static extern ulong GgmlBackendDevCount();
-
-    [DllImport(GgmlDllName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ggml_backend_dev_get")]
-    internal static extern IntPtr GgmlBackendDevGet(ulong index);
-
-    [DllImport(GgmlDllName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ggml_backend_dev_name")]
-    internal static extern IntPtr GgmlBackendDevName(IntPtr device);
 
     // ---- native log control ----
 

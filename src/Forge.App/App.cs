@@ -29,9 +29,7 @@ public partial class App : Application, IOnboardingHost
 {
     private ForgeSettings _settings = new();
     private string _modelPath = "";
-    private int _gpuLayers;
     private InferenceEngine? _engine;
-    private HardwareInfo? _hardware;
     private IdleUnloadManager? _idle;
     private System.Threading.Timer? _idleTimer;
     private HotkeyManager? _hotkeys;
@@ -75,15 +73,7 @@ public partial class App : Application, IOnboardingHost
         DebugLog.SetPath(debugLog);
         _modelPath = modelPath;
 
-        // S8: detect hardware before any native load (LLamaSharp locks its runtime selection
-        // on the first load) and resolve the GPU layer count from the settings choice.
-        var hardware = HardwareDetector.Detect();
-        _hardware = hardware;
-        DebugLog.Write($"hardware: {hardware.Note}");
-        _gpuLayers = ResolveGpuLayerCount(_settings.Hardware, hardware, modelPath);
-        DebugLog.Write($"gpu layer count: {_gpuLayers} (mode: {_settings.Hardware})");
-
-        _engine = new InferenceEngine(_settings.ContextSize, _gpuLayers);
+        _engine = new InferenceEngine(_settings.ContextSize);
         BuildTray();
         // S17: no startup model load — the model loads on demand at the first translation
         // and is unloaded per the settings' unload choice. Start ready; loading shows up
@@ -99,19 +89,6 @@ public partial class App : Application, IOnboardingHost
 
         if (e.Args.Contains("--smoke-crash"))
             _ = SmokeCrashAsync(); // S12 smoke hook: exercises the global handler + crash dump
-    }
-
-    /// <summary>Maps the settings' hardware choice to a GPU layer count via detection.</summary>
-    private static int ResolveGpuLayerCount(HardwareMode mode, HardwareInfo hardware, string modelPath)
-    {
-        if (mode == HardwareMode.Cpu)
-            return 0;
-
-        long modelSize = 0;
-        try { if (File.Exists(modelPath)) modelSize = new FileInfo(modelPath).Length; }
-        catch (Exception) { /* unreadable — treat as unknown size */ }
-
-        return HardwareDetector.RecommendGpuLayerCount(hardware, modelSize);
     }
 
     private void SetupHotkeys()
@@ -347,10 +324,7 @@ public partial class App : Application, IOnboardingHost
         {
             await Task.Run(() => _engine!.LoadModel(modelPath));
             ArmIdleUnload(); // S17: arm the idle timer from (re)load, per current settings
-            if (_engine!.FellBackToCpu)
-                SetState(ModelState.Ready, "Forge: ready (GPU unavailable — using CPU)");
-            else
-                SetState(ModelState.Ready, "Forge: ready");
+            SetState(ModelState.Ready, "Forge: ready");
             return true;
         }
         catch (Exception ex)
@@ -374,7 +348,7 @@ public partial class App : Application, IOnboardingHost
 
     private void OnOpenSettings(object sender, RoutedEventArgs e)
     {
-        new SettingsWindow(SwapModelAsync).Show();
+        new SettingsWindow().Show();
     }
 
     // ---- S20: onboarding wizard host (IOnboardingHost) ----
@@ -467,7 +441,7 @@ public partial class App : Application, IOnboardingHost
         DebugLog.Write("onboarding completed");
     }
 
-    public void OpenSettingsWindow() => new SettingsWindow(SwapModelAsync).Show();
+    public void OpenSettingsWindow() => new SettingsWindow().Show();
 
     /// <summary>
     /// Hot-swaps the configured model without a restart (S9): releases the currently loaded
@@ -485,8 +459,7 @@ public partial class App : Application, IOnboardingHost
         }
 
         _modelPath = newPath;
-        _gpuLayers = ResolveGpuLayerCount(_settings.Hardware, _hardware!, newPath);
-        DebugLog.Write($"model swap: {newPath} (gpu layers: {_gpuLayers})");
+        DebugLog.Write($"model swap: {newPath}");
 
         await Task.Run(() => _engine!.Unload());
         _idle = null; // the old model is gone; ArmIdleUnload re-arms after the next load
@@ -587,7 +560,7 @@ public partial class App : Application, IOnboardingHost
     }
 
     private string? WriteCrashDump(Exception ex) =>
-        _settings.CrashDumpEnabled ? CrashDump.Write(ex, _modelPath, _gpuLayers) : null;
+        _settings.CrashDumpEnabled ? CrashDump.Write(ex, _modelPath) : null;
 
     private static string FatalMessage(string? dumpPath) =>
         "Forge hit an unexpected error and will close." +

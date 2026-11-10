@@ -2,14 +2,6 @@ using System.Text.Json;
 
 namespace Forge.Core;
 
-/// <summary>Where Forge runs its inference. The detection logic is S8's; this is the setting surface.</summary>
-public enum HardwareMode
-{
-    Cpu,
-    Gpu,
-    Auto,
-}
-
 /// <summary>When the loaded model is unloaded after idle time (S17); reload happens on demand at the next translation.</summary>
 public enum ModelUnloadAfter
 {
@@ -25,8 +17,8 @@ public enum ModelUnloadAfter
 /// Forge user settings with JSON persistence.
 ///
 /// Pure: no WPF dependency, so it is testable from the core test project. The app shell (S5)
-/// loads it at startup; the settings window (S7) edits and saves it. GPU detection (S8) binds
-/// to <see cref="Hardware"/>; the model catalog (S9) will bind to <see cref="ModelPath"/> later.
+/// loads it at startup; the settings window (S7) edits and saves it. The model catalog
+/// (S9) binds to <see cref="ModelPath"/>.
 /// </summary>
 public sealed class ForgeSettings
 {
@@ -50,9 +42,6 @@ public sealed class ForgeSettings
     /// key — System.Text.Json ignores unknown properties, so it deserializes to the default.
     /// </summary>
     public ModelUnloadAfter UnloadAfter { get; set; } = ModelUnloadAfter.OneMinute;
-
-    /// <summary>Hardware selection (CPU / GPU / Auto); resolved by <see cref="HardwareDetector"/> (S8).</summary>
-    public HardwareMode Hardware { get; set; } = HardwareMode.Cpu;
 
     /// <summary>
     /// Opt-in crash dumps (plan §7): when true, a fatal exception writes a minimal dump
