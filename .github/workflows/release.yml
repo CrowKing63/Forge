@@ -19,6 +19,19 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      - name: Build llama.cpp (pinned e71c8f673)
+        shell: pwsh
+        run: |
+          git clone --filter=blob:none https://github.com/ggml-org/llama.cpp.git llama-build
+          cd llama-build
+          git fetch origin e71c8f673
+          git checkout e71c8f673
+          cmake -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=OFF
+          cmake --build build --config Release --target llama ggml-base ggml
+          New-Item -ItemType Directory -Path native-dlls | Out-Null
+          Copy-Item build/bin/Release/*.dll native-dlls/
+          Write-Host "Built $(Get-ChildItem native-dlls/*.dll | Measure-Object).Count native DLLs"
+
       - name: Publish (self-contained, single file)
         shell: pwsh
         run: |
@@ -28,6 +41,13 @@ jobs:
             -p:IncludeNativeLibrariesForSelfExtract=true `
             -p:DebugType=none `
             -o installer/publish
+
+      - name: Bundle native runtime DLLs
+        shell: pwsh
+        run: |
+          Copy-Item native-dlls/*.dll installer/publish/ -Force
+          Write-Host "Native DLLs in publish output:"
+          Get-ChildItem installer/publish/*.dll | ForEach-Object { Write-Host "  $($_.Name) $([math]::Round($_.Length/1MB,1)) MB" }
 
       - name: Build installer (Inno Setup 6)
         shell: pwsh
@@ -41,7 +61,7 @@ jobs:
           }
           & $iscc "installer\forge.isn"
 
-      - name: Build portable zip (exe + Assets + portable.txt)
+      - name: Build portable zip (exe + Assets + native DLLs + portable.txt)
         shell: pwsh
         run: |
           $version = $env:GITHUB_REF_NAME -replace '^v', ''
@@ -49,9 +69,11 @@ jobs:
           New-Item -ItemType Directory -Path dist | Out-Null
           # The .ico/.wav assets are ExcludeFromSingleFile, so they live on disk next to the
           # exe (AppContext.BaseDirectory) and LoadIcon reads them from there at startup.
-          # They must ship in the zip — a bare exe with no Assets/ folder crashes on launch.
-          Compress-Archive -Path installer\publish\Forge.App.exe, installer\publish\Assets, installer\publish\portable.txt `
-            -DestinationPath "dist\Forge-Portable-$version-win-x64.zip"
+          # Native DLLs (llama.dll, ggml*.dll) must also ship — LlamaNative loads them
+          # from AppContext.BaseDirectory at model-load time.
+          $items = @("installer\publish\Forge.App.exe", "installer\publish\Assets", "installer\publish\portable.txt")
+          $items += (Get-ChildItem installer\publish\*.dll | ForEach-Object { $_.FullName })
+          Compress-Archive -Path $items -DestinationPath "dist\Forge-Portable-$version-win-x64.zip"
 
       - name: Publish GitHub release
         shell: pwsh
