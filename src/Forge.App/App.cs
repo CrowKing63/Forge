@@ -348,7 +348,9 @@ public partial class App : Application, IOnboardingHost
 
     private void OnOpenSettings(object sender, RoutedEventArgs e)
     {
-        new SettingsWindow().Show();
+        var win = new SettingsWindow(SwapModelAsync);
+        win.Closed += (_, _) => _settings = ForgeSettings.Load();
+        win.Show();
     }
 
     // ---- S20: onboarding wizard host (IOnboardingHost) ----
@@ -441,7 +443,12 @@ public partial class App : Application, IOnboardingHost
         DebugLog.Write("onboarding completed");
     }
 
-    public void OpenSettingsWindow() => new SettingsWindow().Show();
+    public void OpenSettingsWindow()
+    {
+        var win = new SettingsWindow(SwapModelAsync);
+        win.Closed += (_, _) => _settings = ForgeSettings.Load();
+        win.Show();
+    }
 
     /// <summary>
     /// Hot-swaps the configured model without a restart (S9): releases the currently loaded
