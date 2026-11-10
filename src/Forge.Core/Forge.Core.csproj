@@ -8,13 +8,11 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
-  <!-- Pinned llama.cpp build (S21): the exact tree Forge's FFI layer was verified
-       against. Override LlamaRuntimeDir to point at a different build; the copy
-       targets below are no-ops when the directory is absent, so CI without the
-       local build still compiles (the app then fails at runtime with a clear
-       message from LlamaNative.ResolveRuntimeDir). -->
+  <!-- Pinned llama.cpp native runtime (S21): pre-built DLLs live in native/ so both
+       local dev and CI use the exact same binaries verified against LlamaNative.cs.
+       Override LlamaRuntimeDir to point at a different build if needed. -->
   <PropertyGroup>
-    <LlamaRuntimeDir Condition="'$(LlamaRuntimeDir)' == ''">C:\Users\uitaek\.unsloth\llama.cpp\build\bin\Release</LlamaRuntimeDir>
+    <LlamaRuntimeDir Condition="'$(LlamaRuntimeDir)' == ''">$(MSBuildThisFileDirectory)..\native</LlamaRuntimeDir>
   </PropertyGroup>
 
   <ItemGroup>

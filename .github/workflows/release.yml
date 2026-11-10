@@ -19,15 +19,6 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Download native runtime DLLs
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Path native-dlls | Out-Null
-          gh release download runtime-v1 --dir native-dlls --clobber
-          Expand-Archive native-dlls/forge-native-runtime.zip -DestinationPath native-dlls
-          Remove-Item native-dlls/forge-native-runtime.zip
-          Get-ChildItem native-dlls -Filter *.dll | ForEach-Object { Write-Host "  $($_.Name) $([math]::Round($_.Length/1MB,1)) MB" }
-
       - name: Publish (self-contained, single file)
         shell: pwsh
         run: |
@@ -41,7 +32,7 @@ jobs:
       - name: Bundle native runtime DLLs
         shell: pwsh
         run: |
-          Get-ChildItem native-dlls -Filter *.dll | Copy-Item -Destination installer/publish/ -Force
+          Copy-Item native/*.dll installer/publish/ -Force
           Write-Host "Native DLLs in publish output:"
           Get-ChildItem installer/publish -Filter *.dll | ForEach-Object { Write-Host "  $($_.Name) $([math]::Round($_.Length/1MB,1)) MB" }
 
