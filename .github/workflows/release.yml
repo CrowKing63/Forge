@@ -30,7 +30,7 @@ jobs:
           $dllDir = Get-ChildItem build -Recurse -Filter *.dll | Select-Object -First 1 | ForEach-Object { $_.DirectoryName }
           Write-Host "DLL directory: $dllDir"
           New-Item -ItemType Directory -Path ../native-dlls | Out-Null
-          Copy-Item "$dllDir"/*.dll ../native-dlls/
+          Get-ChildItem "$dllDir" -Filter *.dll | Copy-Item -Destination ../native-dlls/
           Write-Host "Built $(Get-ChildItem ../native-dlls/*.dll | Measure-Object).Count native DLLs"
 
       - name: Publish (self-contained, single file)
@@ -46,9 +46,9 @@ jobs:
       - name: Bundle native runtime DLLs
         shell: pwsh
         run: |
-          Copy-Item native-dlls/*.dll installer/publish/ -Force
+          Get-ChildItem native-dlls -Filter *.dll | Copy-Item -Destination installer/publish/ -Force
           Write-Host "Native DLLs in publish output:"
-          Get-ChildItem installer/publish/*.dll | ForEach-Object { Write-Host "  $($_.Name) $([math]::Round($_.Length/1MB,1)) MB" }
+          Get-ChildItem installer/publish -Filter *.dll | ForEach-Object { Write-Host "  $($_.Name) $([math]::Round($_.Length/1MB,1)) MB" }
 
       - name: Build installer (Inno Setup 6)
         shell: pwsh
