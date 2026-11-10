@@ -19,19 +19,14 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Build llama.cpp (upstream, CPU-only)
+      - name: Download native runtime DLLs
         shell: pwsh
         run: |
-          git clone --depth 1 https://github.com/ggml-org/llama.cpp.git llama-build
-          cd llama-build
-          cmake -B build -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=OFF -DGGML_VULKAN=OFF -DBUILD_SHARED_LIBS=ON
-          cmake --build build --config Release --target llama ggml-base ggml
-          # Ninja output layout: build/bin/ (not build/bin/Release/ like the VS generator)
-          $dllDir = Get-ChildItem build -Recurse -Filter *.dll | Select-Object -First 1 | ForEach-Object { $_.DirectoryName }
-          Write-Host "DLL directory: $dllDir"
-          New-Item -ItemType Directory -Path ../native-dlls | Out-Null
-          Get-ChildItem "$dllDir" -Filter *.dll | Copy-Item -Destination ../native-dlls/
-          Write-Host "Built $(Get-ChildItem ../native-dlls/*.dll | Measure-Object).Count native DLLs"
+          New-Item -ItemType Directory -Path native-dlls | Out-Null
+          gh release download runtime-v1 --dir native-dlls --clobber
+          Expand-Archive native-dlls/forge-native-runtime.zip -DestinationPath native-dlls
+          Remove-Item native-dlls/forge-native-runtime.zip
+          Get-ChildItem native-dlls -Filter *.dll | ForEach-Object { Write-Host "  $($_.Name) $([math]::Round($_.Length/1MB,1)) MB" }
 
       - name: Publish (self-contained, single file)
         shell: pwsh
