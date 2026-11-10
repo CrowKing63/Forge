@@ -33,12 +33,13 @@ jobs:
         shell: pwsh
         run: |
           $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          (Get-Content installer\forge.isn -Raw) -replace '#define MyAppVersion ".*"', "#define MyAppVersion `"$version`"" | Set-Content installer\forge.isn
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) {
             winget install --id JRSoftware.InnoSetup --accept-source-agreements --accept-package-agreements
             $iscc = "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
           }
-          & $iscc "/DMyAppVersion=$version" "installer\forge.isn"
+          & $iscc "installer\forge.isn"
 
       - name: Build portable zip (exe + Assets + portable.txt)
         shell: pwsh
